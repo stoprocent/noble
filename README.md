@@ -9,7 +9,7 @@ Without a lot of testing all functionalities seem to be working. I have tested a
 ### Known Issues
 Issues I have found so far are related to buffer sizes and retransmissions which I think is probably handled on HCI level and when using UART needs to be handled by the library.
 
-- I have found so far that when using MTU larger than 20 bytes, Zephyr stops responding. I have played with Zephyr configuration parameters in order to increase buffer size but without luck. So unless you are not getting using Packet Lenght Extension and stay below or equal 20 bytes everything is working fine.
+- I have found so far that when using MTU larger than 20 bytes, Zephyr stops responding. I have played with Zephyr configuration parameters in order to increase buffer size but without luck. So unless you are not using Packet Lenght Extension and stay below or equal 20 bytes everything is working fine.
 - Another issue is handling retransmissions which is something I can probably fix by spending some time on it. When there is a lot of `Write without Response` calls Zephyr is sending back buffer size errors which need to be handled and retransmit missing packets.
 
 ## How to use this?
