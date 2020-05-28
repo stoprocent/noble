@@ -33,19 +33,20 @@
     "win32"
   ],
   "dependencies": {
-    "debug": "~2.2.0"
+    "debug": "~2.2.0",
+    "async": "~0.2.9"
   },
   "optionalDependencies": {
     "bluetooth-hci-socket": "^0.5.1",
     "bplist-parser": "0.0.6",
-    "xpc-connection": "~0.1.4"
+    "xpc-connection": "~0.1.4",
+    "serialport": "9.0.0"
   },
   "devDependencies": {
     "jshint": "latest",
     "mocha": "~1.8.2",
     "should": "~1.2.2",
     "sinon": "~1.6.0",
-    "async": "~0.2.9",
     "ws": "~0.4.31"
   },
   "scripts": {
