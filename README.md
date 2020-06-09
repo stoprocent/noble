@@ -19,9 +19,10 @@ Issues I have found so far are related to buffer sizes and retransmissions which
 3. Compile HCI UART Example - `west build -p auto -b <your-board-name> zephyr/samples/bluetooth/hci_uart`
 	- e.g. When using nRF52840 DK it will be `west build -p auto -b nrf52840dk_nrf52840 zephyr/samples/bluetooth/hci_uart`
 	- If you are using nRF52840 DK you can in fact just use compiled HEX [misc/nrf52840dk.hex](https://github.com/stoprocent/noble/blob/feature/hci_over_uart/misc/nrf52840dk.hex) (Buad Rate set to `115200`)
+	- If you are using nRF52832 DK you can in fact just use compiled HEX [misc/nrf52832dk.hex](https://github.com/stoprocent/noble/blob/feature/hci_over_uart/misc/nrf52832dk.hex) (Buad Rate set to `115200`)
 4. Flash the firmware to Nordic Board e.g. using `nrfjprog`
 	- `nrfjprog -f NRF52 --eraseall`
-	- `nrfjprog -f NRF52 --program /Users/stoprocent/Development/zephyrproject/build/zephyr/zephyr.hex –-chiperase --reset`
+	- `nrfjprog -f NRF52 --program misc/nrf52840dk.hex –-chiperase --reset`
 5. When you get a nordic board connected to the PC/Mac etc. with UART interface you are good to go.
 6. In order to run any example from the examples folder or your own code you have to provide UART port by defining env variable: `NOBLE_HCI_UART_PORT`. Optionally if you use different Baud Rate you can change it by specifing `NOBLE_HCI_UART_BAUD_RATE`. Default value is `115200
 7. e.g. `NOBLE_HCI_UART_PORT=/dev/tty.usbmodem0006837533091 node examples/peripheral-explorer.js b8:27:eb:83:9b:19`
