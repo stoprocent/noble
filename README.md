@@ -364,7 +364,7 @@ The `connect` function is used to establish a Bluetooth Low Energy connection to
 
 ```typescript
 // Callback-based usage
-connect(peripheralUuid: string, options?: object, callback?: (error?: Error, peripheral: Peripheral) => void): void;
+connect(peripheralUuid: string, options?: object, callback?: (peripheral: Peripheral, error?: Error) => void): void;
 
 // Promise-based usage
 connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
@@ -384,7 +384,7 @@ The `connect` function initiates a connection to a BLE peripheral. The function 
 const noble = require('@stoprocent/noble');
 
 // Using callback
-noble.connect('1234567890abcdef', {}, (error, peripheral) => {
+noble.connect('1234567890abcdef', {}, (peripheral, error) => {
   if (error) {
     console.error('Connection error:', error);
   } else {

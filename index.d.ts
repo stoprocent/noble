@@ -25,7 +25,7 @@ export declare function startScanning(serviceUUIDs?: string[], allowDuplicates?:
 export declare function startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
 export declare function stopScanning(callback?: () => void): void;
 export declare function stopScanningAsync(): Promise<void>;
-export declare function connect(peripheralUuid: string, options?: object, callback?: (error?: Error, peripheral: Peripheral) => void): void;
+export declare function connect(peripheralUuid: string, options?: object, callback?: (peripheral: Peripheral, error?: Error) => void): void;
 export declare function connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
 export declare function cancelConnect(peripheralUuid: string, options?: object): void;
 export declare function reset(): void;
