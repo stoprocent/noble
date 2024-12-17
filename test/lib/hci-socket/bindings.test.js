@@ -268,22 +268,28 @@ describe('hci-socket bindings', () => {
     assert.calledTwice(process.on);
   });
 
-  describe('onExit', () => {
+  describe('stop', () => {
     it('no handles', () => {
       bindings._gap.stopScanning = fake.resolves(null);
+      bindings._hci.reset = fake.resolves(null);
+      bindings._hci.stop = fake.resolves(null);
 
-      bindings.onExit();
+      bindings.stop();
 
       assert.calledOnce(bindings._gap.stopScanning);
+      assert.calledOnce(bindings._hci.reset);
+      assert.calledOnce(bindings._hci.stop);
     });
 
     it('with handles', () => {
       bindings._gap.stopScanning = fake.resolves(null);
       bindings._hci.disconnect = fake.resolves(null);
+      bindings._hci.reset = fake.resolves(null);
+      bindings._hci.stop = fake.resolves(null);
 
       bindings._aclStreams = [1, 2, 3];
 
-      bindings.onExit();
+      bindings.stop();
 
       assert.calledOnce(bindings._gap.stopScanning);
       assert.calledThrice(bindings._hci.disconnect);
