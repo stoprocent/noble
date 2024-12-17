@@ -29,6 +29,7 @@ export declare function connect(peripheralUuid: string, options?: object, callba
 export declare function connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
 export declare function cancelConnect(peripheralUuid: string, options?: object): void;
 export declare function reset(): void;
+export declare function stop(): void;
 
 export declare function setAddress(address: string): void;
 
