@@ -9,7 +9,7 @@ noble.on('stateChange', async (state) => {
   if (state === 'poweredOn') {
     if (directConnect === '1') {
       await noble.stopScanningAsync();
-      await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''))
+      await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''));
     } else {
       await noble.startScanningAsync();
     }
