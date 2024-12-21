@@ -109,6 +109,7 @@ describe('hci-socket hci', () => {
       hci.readLeBufferSize = sinon.spy();
       hci.readBdAddr = sinon.spy();
       hci.init = sinon.spy();
+      hci.readLeSupportedFeatures = sinon.spy();
       hci.setCodedPhySupport = sinon.spy();
 
       hci.on('stateChange', callback);
@@ -170,13 +171,7 @@ describe('hci-socket hci', () => {
       hci.pollIsDevUp();
 
       assert.calledOnceWithExactly(hci.setSocketFilter);
-      assert.calledOnceWithExactly(hci.setEventMask);
-      assert.calledOnceWithExactly(hci.setLeEventMask);
-      assert.calledOnceWithExactly(hci.readLocalVersion);
-      assert.calledOnceWithExactly(hci.writeLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeBufferSize);
-      assert.calledOnceWithExactly(hci.readBdAddr);
+      assert.calledOnceWithExactly(hci.readLeSupportedFeatures);
 
       assert.notCalled(hci.setCodedPhySupport);
       assert.notCalled(hci._socket.removeAllListeners);
@@ -193,14 +188,7 @@ describe('hci-socket hci', () => {
       hci.pollIsDevUp();
 
       assert.calledOnceWithExactly(hci.setSocketFilter);
-      assert.calledOnceWithExactly(hci.setEventMask);
-      assert.calledOnceWithExactly(hci.setLeEventMask);
-      assert.calledOnceWithExactly(hci.readLocalVersion);
-      assert.calledOnceWithExactly(hci.writeLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeBufferSize);
-      assert.calledOnceWithExactly(hci.readBdAddr);
-      assert.calledOnceWithExactly(hci.setCodedPhySupport);
+      assert.calledOnceWithExactly(hci.readLeSupportedFeatures);
 
       assert.notCalled(hci._socket.removeAllListeners);
       assert.notCalled(hci.init);
@@ -698,6 +686,81 @@ describe('hci-socket hci', () => {
       should(hci._aclConnections).have.keys(4660, 4661);
       should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
       should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+
+      describe('LE_READ_LOCAL_SUPPORTED_FEATURES', () => {
+        beforeEach(() => {
+          hci.setCodedPhySupport = sinon.spy();
+          hci.setEventMask = sinon.spy();
+          hci.setLeEventMask = sinon.spy();
+          hci.readLocalVersion = sinon.spy();
+          hci.writeLeHostSupported = sinon.spy();
+          hci.readLeHostSupported = sinon.spy();
+          hci.readLeBufferSize = sinon.spy();
+          hci.readBdAddr = sinon.spy();
+        });
+      
+        it('should not process on error status', () => {
+          const cmd = 8195;
+          const status = 1;
+          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify no methods were called
+          assert.notCalled(hci.setCodedPhySupport);
+          assert.notCalled(hci.setEventMask);
+          assert.notCalled(hci.setLeEventMask);
+          assert.notCalled(hci.readLocalVersion);
+          assert.notCalled(hci.writeLeHostSupported);
+          assert.notCalled(hci.readLeHostSupported);
+          assert.notCalled(hci.readLeBufferSize);
+          assert.notCalled(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(false);
+        });
+      
+        it('should process without extended features', () => {
+          const cmd = 8195;
+          const status = 0;
+          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]); // No bits set
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify extended-specific method not called
+          assert.notCalled(hci.setCodedPhySupport);
+      
+          // Verify other methods were called
+          assert.calledOnce(hci.setEventMask);
+          assert.calledOnce(hci.setLeEventMask);
+          assert.calledOnce(hci.readLocalVersion);
+          assert.calledOnce(hci.writeLeHostSupported);
+          assert.calledOnce(hci.readLeHostSupported);
+          assert.calledOnce(hci.readLeBufferSize);
+          assert.calledOnce(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(false);
+        });
+      
+        it('should process with extended features', () => {
+          const cmd = 8195;
+          const status = 0;
+          const result = Buffer.from([0x40, 0x00, 0x00, 0x00]); // Bit 6 set for extended features
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify all methods were called including extended-specific
+          assert.calledOnce(hci.setCodedPhySupport);
+          assert.calledOnce(hci.setEventMask);
+          assert.calledOnce(hci.setLeEventMask);
+          assert.calledOnce(hci.readLocalVersion);
+          assert.calledOnce(hci.writeLeHostSupported);
+          assert.calledOnce(hci.readLeHostSupported);
+          assert.calledOnce(hci.readLeBufferSize);
+          assert.calledOnce(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(true);
+        });
+      });
     });
 
     it('should only processCmdStatusEvent - HCI_EVENT_PKT / EVT_CMD_STATUS', () => {
