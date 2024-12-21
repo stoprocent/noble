@@ -35,7 +35,7 @@
       'msvs_target_platform_minversion':'10.0.18362.0',
       'conditions': [
         ['OS=="win"', { 
-          'defines': [ '_HAS_EXCEPTIONS=1' ] 
+          'defines': [ '_HAS_EXCEPTIONS=1', 'NAPI_CPP_EXCEPTIONS' ] 
         }]
       ],
     }
