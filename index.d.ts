@@ -13,6 +13,7 @@
 
 import events = require("events");
 
+export declare function waitForPoweredOn(timeout?: number): Promise<void>;
 /**
  * @deprecated
  */

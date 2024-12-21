@@ -744,7 +744,7 @@ describe('hci-socket hci', () => {
         it('should process with extended features', () => {
           const cmd = 8195;
           const status = 0;
-          const result = Buffer.from([0x40, 0x00, 0x00, 0x00]); // Bit 6 set for extended features
+          const result = Buffer.from("bd5f660000000000", "hex");
       
           hci.processCmdCompleteEvent(cmd, status, result);
       
