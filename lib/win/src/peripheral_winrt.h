@@ -79,4 +79,5 @@ private:
     GetDescriptorFromCharacteristic(GattCharacteristic characteristic, winrt::guid descriptorUuid,
                                     std::function<void(std::optional<GattDescriptor>)> callback);
     std::unordered_map<winrt::guid, CachedService> cachedServices;
+    void ProcessServiceData(const BluetoothLEAdvertisementDataSection& ds, size_t uuidSize);
 };

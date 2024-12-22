@@ -8,7 +8,7 @@ using namespace winrt::Windows::Storage::Streams;
 using winrt::Windows::Devices::Bluetooth::BluetoothCacheMode;
 using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattCharacteristicsResult;
 using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDescriptorsResult;
-using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDeviceServicesResult;
+using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDeviceServicesResult;    
 using winrt::Windows::Foundation::AsyncStatus;
 using winrt::Windows::Foundation::IAsyncOperation;
 
@@ -29,6 +29,62 @@ PeripheralWinrt::~PeripheralWinrt()
     {
         device->ConnectionStatusChanged(connectionToken);
     }
+}
+
+void PeripheralWinrt::ProcessServiceData(const BluetoothLEAdvertisementDataSection& ds, size_t uuidSize) 
+{
+    auto d = ds.Data();
+    auto dr = DataReader::FromBuffer(d);
+    dr.ByteOrder(ByteOrder::LittleEndian);
+    
+    std::vector<uint8_t> data;
+    std::string uuidStr;
+
+    if (uuidSize == 16) { // 128-bit UUID
+        uint64_t low = dr.ReadUInt64();
+        uint64_t high = dr.ReadUInt64();
+        
+        char uuid[37];
+        snprintf(uuid, sizeof(uuid), 
+                "%08x-%04x-%04x-%04x-%012llx",
+                (uint32_t)((high >> 32) & 0xFFFFFFFF),
+                (uint16_t)((high >> 16) & 0xFFFF),
+                (uint16_t)(high & 0xFFFF),
+                (uint16_t)((low >> 48) & 0xFFFF),
+                (unsigned long long)(low & 0xFFFFFFFFFFFF));
+        uuidStr = uuid;
+    } 
+    else { // 16-bit or 32-bit UUID
+        char uuid[9];  // Max 8 chars for 32-bit UUID + null terminator
+        if (uuidSize == 2) {
+            uint16_t serviceUuid = dr.ReadUInt16();
+            snprintf(uuid, sizeof(uuid), "%04x", serviceUuid);
+        } else { // 4 bytes
+            uint32_t serviceUuid = dr.ReadUInt32();
+            snprintf(uuid, sizeof(uuid), "%08x", serviceUuid);
+        }
+        uuidStr = uuid;
+    }
+    
+    // Read remaining data
+    data.resize(d.Length() - uuidSize);
+    dr.ReadBytes(data);
+    
+    // Find and update existing entry or add new one
+    bool found = false;
+    for (auto& pair : serviceData) {
+        if (pair.first == uuidStr) {
+            pair.second = data;
+            found = true;
+            break;
+        }
+    }
+    
+    if (!found) {
+        serviceData.push_back(std::make_pair(uuidStr, data));
+    }
+    
+    dr.Close();
 }
 
 void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement& advertisment,
@@ -56,13 +112,25 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
                 txPowerLevel -= 256;
             dr.Close();
         }
-        if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ManufacturerSpecificData())
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ManufacturerSpecificData())
         {
             auto d = ds.Data();
             auto dr = DataReader::FromBuffer(d);
             manufacturerData.resize(d.Length());
             dr.ReadBytes(manufacturerData);
             dr.Close();
+        }
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ServiceData16BitUuids())
+        {
+            ProcessServiceData(ds, 2);  // 2 bytes for 16-bit UUID
+        }
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ServiceData32BitUuids())
+        {
+            ProcessServiceData(ds, 4);  // 4 bytes for 32-bit UUID
+        }
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ServiceData128BitUuids())
+        {
+            ProcessServiceData(ds, 16);  // 16 bytes for 128-bit UUID
         }
     }
 
@@ -258,7 +326,8 @@ void PeripheralWinrt::GetDescriptor(winrt::guid serviceUuid, winrt::guid charact
                 [=](std::optional<GattCharacteristic> characteristic) {
                     if (characteristic)
                     {
-                        GetDescriptorFromCharacteristic(*characteristic, descriptorUuid, callback);
+                        GetDescriptorFromCharacteristic(*characteristic, descriptorUuid,
+                                                            callback);
                     }
                     else
                     {
