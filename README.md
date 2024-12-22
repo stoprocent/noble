@@ -16,9 +16,12 @@ This fork of `noble` was created to introduce several key improvements and new f
    
 2. **macOS Native Bindings Fix**: I have fixed the native bindings for macOS, ensuring better compatibility and performance on Apple devices.
 
-3. **New Features**: 
-  - A `setAddress` function has been added, allowing users to set the MAC address of the central device. 
+3. **Windows Native Bindings Fix**: I have fixed the native bindings for Windows, adding support for `Service Data` from advertisements.
+
+4. **New Features**: 
+  - A `setAddress(...)` function has been added, allowing users to set the MAC address of the central device. 
   - A `connect(...)/connectAsync(...)` function has been added, allowing users to connect directly to specific device by address/identifier without a need to prior scan. 
+  - A `waitForPoweredOn(...)` function to wait for the adapter to be powered on in await/async functions.
   - Additionally, I plan to add raw L2CAP channel support, enhancing low-level Bluetooth communication capabilities.
 
 If you appreciate these enhancements and the continued development of this project, please consider supporting my work. 
@@ -49,14 +52,16 @@ const noble = require('@stoprocent/noble');
 
 ```javascript
 // Read the battery level of the first found peripheral exposing the Battery Level characteristic
+const noble = require('../');
 
-const noble = require('@stoprocent/noble');
-
-noble.on('stateChange', async (state) => {
-  if (state === 'poweredOn') {
+async function run() {
+  try {
+    await noble.waitForPoweredOn();
     await noble.startScanningAsync(['180f'], false);
+  } catch (error) {
+    console.error(error);
   }
-});
+}
 
 noble.on('discover', async (peripheral) => {
   await noble.stopScanningAsync();
@@ -69,6 +74,9 @@ noble.on('discover', async (peripheral) => {
   await peripheral.disconnectAsync();
   process.exit(0);
 });
+
+run();
+
 ```
 ## Use Noble With BLE5 Extended Features With HCI 
 
