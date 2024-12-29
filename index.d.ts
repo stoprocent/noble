@@ -13,6 +13,14 @@
 
 import events = require("events");
 
+export interface ConnectOptions {
+  addressType?: 'public' | 'random';
+  minInterval?: number;
+  maxInterval?: number;
+  latency?: number;
+  timeout?: number;
+}
+
 export declare function waitForPoweredOn(timeout?: number): Promise<void>;
 /**
  * @deprecated
@@ -26,8 +34,8 @@ export declare function startScanning(serviceUUIDs?: string[], allowDuplicates?:
 export declare function startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
 export declare function stopScanning(callback?: () => void): void;
 export declare function stopScanningAsync(): Promise<void>;
-export declare function connect(peripheralUuid: string, options?: object, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
-export declare function connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
+export declare function connect(peripheralUuid: string, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
+export declare function connectAsync(peripheralUuid: string, options?: ConnectOptions): Promise<Peripheral>;
 export declare function cancelConnect(peripheralUuid: string, options?: object): void;
 export declare function reset(): void;
 export declare function stop(): void;
