@@ -2,19 +2,23 @@ const noble = require('../');
 
 const directConnect = process.argv[2].toLowerCase();
 const peripheralIdOrAddress = process.argv[3].toLowerCase();
+const addressType = process.argv[4].toLowerCase() || 'random';
 
 const starTime = Date.now();
 
-noble.on('stateChange', async (state) => {
-  if (state === 'poweredOn') {
+async function main () {
+  try {
+    await noble.waitForPoweredOn();
     if (directConnect === '1') {
-      await noble.stopScanningAsync();
-      await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''));
+      const peripheral = await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''), { addressType });
+      await explore(peripheral);
     } else {
       await noble.startScanningAsync();
     }
+  } catch (error) {
+    console.error('Error:', error);
   }
-});
+}
 
 noble.on('discover', async (peripheral) => {
   if ([peripheral.id, peripheral.address].includes(peripheralIdOrAddress)) {
@@ -143,3 +147,5 @@ process.on('SIGTERM', function () {
   console.log('Caught interrupt signal');
   noble.stopScanning(() => process.exit());
 });
+
+main();
