@@ -135,23 +135,23 @@ describe('hci-socket bindings', () => {
     it('missing peripheral, no queue, public address', () => {
       bindings._hci.createLeConn = fake.resolves(null);
 
-      bindings.connect('112233445566', 'parameters');
+      bindings.connect('112233445566', { addressType: 'public' });
 
       should(bindings._pendingConnectionUuid).eql('112233445566');
 
       assert.calledOnce(bindings._hci.createLeConn);
-      assert.calledWith(bindings._hci.createLeConn, '11:22:33:44:55:66', 'public', 'parameters');
+      assert.calledWith(bindings._hci.createLeConn, '11:22:33:44:55:66', 'public', { addressType: 'public' });
     });
 
     it('missing peripheral, no queue, random address', () => {
       bindings._hci.createLeConn = fake.resolves(null);
 
-      bindings.connect('f32233445566', 'parameters');
+      bindings.connect('f32233445566', { addressType: 'random' });
 
       should(bindings._pendingConnectionUuid).eql('f32233445566');
 
       assert.calledOnce(bindings._hci.createLeConn);
-      assert.calledWith(bindings._hci.createLeConn, 'f3:22:33:44:55:66', 'random', 'parameters');
+      assert.calledWith(bindings._hci.createLeConn, 'f3:22:33:44:55:66', 'random', { addressType: 'random' });
     });
 
     it('existing peripheral, no queue', () => {
