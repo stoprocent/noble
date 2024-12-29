@@ -21,6 +21,9 @@ async function main () {
 }
 
 noble.on('discover', async (peripheral) => {
+  if (directConnect === '1') {
+    return;
+  }
   if ([peripheral.id, peripheral.address].includes(peripheralIdOrAddress)) {
     await noble.stopScanningAsync();
     
