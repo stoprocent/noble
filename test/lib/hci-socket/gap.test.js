@@ -344,7 +344,7 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: []
+          serviceSolicitationUuids: []
         },
         rssi,
         count: 1,
@@ -375,7 +375,7 @@ describe('hci-socket gap', () => {
         manufacturerData: 'manufacturerData',
         serviceData: ['data'],
         serviceUuids: ['uuids'],
-        solicitationServiceUuids: ['solicitation']
+        serviceSolicitationUuids: []
       };
       const count = 8;
       const hasScanResponse = true;
@@ -473,7 +473,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -513,7 +512,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -553,7 +551,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -599,7 +596,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: ['201'],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -646,7 +642,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: ['0f0e0d0c0b0a09080706050403020100'],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -692,7 +687,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: [],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -738,7 +732,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -784,7 +777,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['201']
         },
         rssi,
@@ -830,7 +822,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['0f0e0d0c0b0a09080706050403020100']
         },
         rssi,
@@ -881,7 +872,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -932,7 +922,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -983,7 +972,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1029,7 +1017,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['4030201']
         },
         rssi,
@@ -1074,7 +1061,6 @@ describe('hci-socket gap', () => {
           manufacturerData,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1137,7 +1123,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1186,7 +1171,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1220,7 +1204,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,

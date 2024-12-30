@@ -137,7 +137,9 @@ describe('hci-socket bindings', () => {
 
       bindings.connect('112233445566', { addressType: 'public' });
 
-      should(bindings._pendingConnectionUuid).eql('112233445566');
+      should(bindings._connectionQueue).length(1);
+      should(bindings._connectionQueue[0].id).eql('112233445566');
+      should(bindings._connectionQueue[0].params).eql({ addressType: 'public' });
 
       assert.calledOnce(bindings._hci.createLeConn);
       assert.calledWith(bindings._hci.createLeConn, '11:22:33:44:55:66', 'public', { addressType: 'public' });
@@ -148,7 +150,9 @@ describe('hci-socket bindings', () => {
 
       bindings.connect('f32233445566', { addressType: 'random' });
 
-      should(bindings._pendingConnectionUuid).eql('f32233445566');
+      should(bindings._connectionQueue).length(1);
+      should(bindings._connectionQueue[0].id).eql('f32233445566');
+      should(bindings._connectionQueue[0].params).eql({ addressType: 'random' });
 
       assert.calledOnce(bindings._hci.createLeConn);
       assert.calledWith(bindings._hci.createLeConn, 'f3:22:33:44:55:66', 'random', { addressType: 'random' });
@@ -165,7 +169,9 @@ describe('hci-socket bindings', () => {
 
       bindings.connect('peripheralUuid', 'parameters');
 
-      should(bindings._pendingConnectionUuid).eql('peripheralUuid');
+      should(bindings._connectionQueue).length(1);
+      should(bindings._connectionQueue[0].id).eql('peripheralUuid');
+      should(bindings._connectionQueue[0].params).eql('parameters');
 
       assert.calledOnce(bindings._hci.createLeConn);
       assert.calledWith(bindings._hci.createLeConn, 'address', 'addressType', 'parameters');
@@ -175,8 +181,10 @@ describe('hci-socket bindings', () => {
       bindings._pendingConnectionUuid = 'pending-uuid';
 
       bindings.connect('peripheralUuid', 'parameters');
-
-      should(bindings._connectionQueue).deepEqual([{ id: 'peripheralUuid', params: 'parameters' }]);
+      
+      should(bindings._connectionQueue).length(1);
+      should(bindings._connectionQueue[0].id).eql('peripheralUuid');
+      should(bindings._connectionQueue[0].params).eql('parameters');
     });
   });
 
@@ -641,7 +649,7 @@ describe('hci-socket bindings', () => {
 
       const connectCallback = sinon.spy();
 
-      bindings._pendingConnectionUuid = 'pending_uuid';
+      bindings._connectionQueue.push({ id: 'pending_uuid' });
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
@@ -651,7 +659,7 @@ describe('hci-socket bindings', () => {
 
       assert.calledOnceWithMatch(connectCallback, 'pending_uuid', sinon.match({ message: 'custom mapper (0x1)' }));
 
-      should(bindings._pendingConnectionUuid).equal(null);
+      should(bindings._connectionQueue).length(0);
     });
 
     it('with unmapped status on master node', () => {
@@ -663,7 +671,7 @@ describe('hci-socket bindings', () => {
 
       const connectCallback = sinon.spy();
 
-      bindings._pendingConnectionUuid = 'pending_uuid';
+      bindings._connectionQueue.push({ id: 'pending_uuid' });
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
@@ -673,29 +681,31 @@ describe('hci-socket bindings', () => {
 
       assert.calledOnceWithExactly(connectCallback, 'pending_uuid', sinon.match({ message: 'HCI Error: Unknown (0x2)' }));
 
-      should(bindings._pendingConnectionUuid).equal(null);
+      should(bindings._connectionQueue).length(0);
     });
 
     it('with connection queue', () => {
       const status = 0;
       const handle = 'handle';
       const role = 0;
-      const addressType = 'addressType';
-      const address = 'address:split:by:separator';
+      const addressType = 'random';
+      const address = '11:22:33:44:55:66';
 
       const connectCallback = sinon.spy();
 
-      bindings._connectionQueue = [{ id: 'queuedId', params: { p1: 'p1' } }];
-      bindings._addresses = { queuedId: 'queuedAddress' };
-      bindings._addresseTypes = { queuedId: 'queuedAddressType' };
+      bindings._addresses = { 'queuedId_1': '112233445566', 'queuedId_2': '998877665544' };
+      bindings._addresseTypes = { 'queuedId_1': 'random', 'queuedId_2': 'public' };
+      bindings.connect('queuedId_1', { addressType: 'random' });
+      bindings.connect('queuedId_2', { addressType: 'public' });
+
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
-      assert.calledOnceWithExactly(connectCallback, 'addresssplitbyseparator', null);
+      assert.calledOnceWithExactly(connectCallback, '112233445566', null);
+      assert.calledWithExactly(createLeConnSpy, '112233445566', 'random', { addressType: 'random' });
+      assert.calledWithExactly(createLeConnSpy, '998877665544', 'public', { addressType: 'public' });
 
-      assert.calledOnceWithExactly(createLeConnSpy, 'queuedAddress', 'queuedAddressType', { p1: 'p1' });
-
-      should(bindings._pendingConnectionUuid).equal('queuedId');
+      should(bindings._connectionQueue).length(1);
     });
   });
 
