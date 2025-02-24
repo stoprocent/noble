@@ -78,13 +78,13 @@ describe('hci-socket bindings', () => {
   describe('onSigInt', () => {
     it('should exit', () => {
       const sigIntListeners = process.listeners('SIGINT');
-      bindings.onSigIntBinded = sigIntListeners[sigIntListeners.length - 1];
+      bindings._sigIntHandler = sigIntListeners[sigIntListeners.length - 1];
       bindings.onSigInt();
       assert.calledOnceWithExactly(process.exit, 1);
     });
 
     it('should not exit', () => {
-      bindings.onSigIntBinded = sinon.spy();
+      bindings._sigIntHandler = sinon.spy();
       bindings.onSigInt();
       assert.notCalled(process.exit);
     });
@@ -292,7 +292,9 @@ describe('hci-socket bindings', () => {
       bindings._gap.stopScanning = fake.resolves(null);
       bindings._hci.reset = fake.resolves(null);
       bindings._hci.stop = fake.resolves(null);
-
+      bindings._sigIntHandler = fake.resolves(null);
+      bindings._exitHandler = fake.resolves(null);
+      
       bindings.stop();
 
       assert.calledOnce(bindings._gap.stopScanning);
@@ -305,6 +307,8 @@ describe('hci-socket bindings', () => {
       bindings._hci.disconnect = fake.resolves(null);
       bindings._hci.reset = fake.resolves(null);
       bindings._hci.stop = fake.resolves(null);
+      bindings._sigIntHandler = fake.resolves(null);
+      bindings._exitHandler = fake.resolves(null);
 
       bindings._aclStreams = [1, 2, 3];
 
