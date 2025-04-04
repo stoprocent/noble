@@ -63,12 +63,6 @@ export declare function removeListener(event: string, listener: Function): event
 export declare function removeAllListeners(event?: string): events.EventEmitter;
 
 export var state: "unknown" | "resetting" | "unsupported" | "unauthorized" | "poweredOff" | "poweredOn";
-/**
- * @deprecated Use `state` instead.
- */
-export var _state: "unknown" | "resetting" | "unsupported" | "unauthorized" | "poweredOff" | "poweredOn";
-
-export var _bindings: any;
 
 export interface ServicesAndCharacteristics {
   services: Service[];
@@ -113,6 +107,7 @@ export declare class Peripheral extends events.EventEmitter {
     on(event: "disconnect", listener: (error: string) => void): this;
     on(event: "rssiUpdate", listener: (rssi: number) => void): this;
     on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
+    on(event: "mtu", listener: (mtu: number) => void): this;
     on(event: string, listener: Function): this;
 
     once(event: "connect", listener: (error: string) => void): this;

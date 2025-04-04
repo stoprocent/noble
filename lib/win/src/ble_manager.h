@@ -1,26 +1,20 @@
-//
-//  ble_manager.h
-//  noble-winrt-native
-//
-//  Created by Georg Vienna on 03.09.18.
-//
-
 #pragma once
 
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 
-#include "callbacks.h"
+#include "Emit.h"
+#include "notify_map.h"
 #include "peripheral_winrt.h"
 #include "radio_watcher.h"
-#include "notify_map.h"
 
 using namespace winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
 using namespace winrt::Windows::Devices::Bluetooth::Advertisement;
 using winrt::Windows::Foundation::AsyncStatus;
+using winrt::Windows::Foundation::IAsyncOperation;
+using winrt::Windows::Foundation::IInspectable;
 
-class BLEManager
-{
+class BLEManager {
 public:
     // clang-format off
     BLEManager(const Napi::Value& receiver, const Napi::Function& callback);
@@ -44,7 +38,7 @@ public:
 
 private:
     // clang-format off
-    void OnRadio(Radio& radio);
+    void OnRadio(Radio& radio, const AdapterCapabilities& capabilities);
     void OnScanResult(BluetoothLEAdvertisementWatcher watcher, const BluetoothLEAdvertisementReceivedEventArgs& args);
     void OnScanStopped(BluetoothLEAdvertisementWatcher watcher, const BluetoothLEAdvertisementWatcherStoppedEventArgs& args);
     void OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status, std::string uuid);
@@ -62,16 +56,19 @@ private:
     void OnReadHandle(IAsyncOperation<GattReadResult> asyncOp, AsyncStatus status, std::string uuid, int handle);
     void OnWriteHandle(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus status, std::string uuid, int handle);
     // clang-format on
+    
+    bool mAllowDuplicates;
 
     Emit mEmit;
     RadioWatcher mWatcher;
     AdapterState mRadioState;
     BluetoothLEAdvertisementWatcher mAdvertismentWatcher;
+
     winrt::event_revoker<IBluetoothLEAdvertisementWatcher> mReceivedRevoker;
     winrt::event_revoker<IBluetoothLEAdvertisementWatcher> mStoppedRevoker;
-    bool mAllowDuplicates;
 
     std::unordered_map<std::string, PeripheralWinrt> mDeviceMap;
+    std::vector<winrt::guid> mScanServiceUUIDs;
     std::set<std::string> mAdvertismentMap;
     NotifyMap mNotifyMap;
 };

@@ -6,19 +6,12 @@
     {
       'target_name': 'binding',
       'sources': [ 
-        'src/noble_winrt.cc', 
-        'src/napi_winrt.cc', 
-        'src/peripheral_winrt.cc',
-        'src/radio_watcher.cc', 
-        'src/notify_map.cc', 
-        'src/ble_manager.cc', 
-        'src/winrt_cpp.cc', 
-        'src/winrt_guid.cc', 
-        'src/callbacks.cc' 
+        "<!@(node -p \"require('fs').readdirSync('src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'src/'+f).join(' ')\")",
+        "<!@(node -p \"require('fs').readdirSync('../common/src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'../common/src/'+f).join(' ')\")"
       ],
       'include_dirs': [
         "<!(node -p \"require('node-addon-api').include_dir\")",
-        "<!@(node -p \"require('napi-thread-safe-callback').include\")"
+        "../common/include"
       ],
       'cflags!': [ '-fno-exceptions' ],
       'cflags_cc!': [ '-fno-exceptions' ],
@@ -27,7 +20,7 @@
           'ExceptionHandling': 1,
           'AdditionalOptions': [
             '/await', 
-            '/std:c++latest'
+            '/std:c++20'
           ],
         },
       },

@@ -1,29 +1,52 @@
-//
-//  radio_watcher.cc
-//  noble-winrt-native
-//
-//  Created by Georg Vienna on 07.09.18.
-//
+// Standard library includes
+#include <future>
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <cstdint>
 
-#pragma once
+// Windows Runtime includes
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Devices.Bluetooth.h>
+#include <winrt/Windows.Devices.Enumeration.h>
+#include <winrt/Windows.Devices.Radios.h>
 
+// Project includes
 #include "radio_watcher.h"
 #include "winrt_cpp.h"
-#include <winrt/Windows.Foundation.Collections.h>
 
-using winrt::Windows::Devices::Radios::RadioKind;
-using winrt::Windows::Foundation::AsyncStatus;
+using namespace winrt::Windows::Devices::Enumeration;
+using namespace winrt::Windows::Devices::Bluetooth;
+using namespace winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
+using winrt::Windows::Devices::Radios::RadioState;
 
 template <typename O, typename M, class... Types> auto bind2(O* object, M method, Types&... args)
 {
     return std::bind(method, object, std::placeholders::_1, std::placeholders::_2, args...);
 }
 
-#define RADIO_INTERFACE_CLASS_GUID \
-    L"System.Devices.InterfaceClassGuid:=\"{A8804298-2D5F-42E3-9531-9C8C39EB29CE}\""
+const char* adapterStateToString(AdapterState state)
+{
+    switch (state)
+    {
+    case AdapterState::Unsupported:
+        return "unsupported";
+    case AdapterState::On:
+        return "poweredOn";
+        break;
+    case AdapterState::Off:
+        return "poweredOff";
+        break;
+    case AdapterState::Disabled:
+        return "poweredOff";
+        break;
+    default:
+        return "unknown";
+    }
+}
 
 RadioWatcher::RadioWatcher()
-    : mRadio(nullptr), watcher(DeviceInformation::CreateWatcher(RADIO_INTERFACE_CLASS_GUID))
+    : mRadio(nullptr), watcher(DeviceInformation::CreateWatcher(BluetoothAdapter::GetDeviceSelector()))
 {
     mAddedRevoker = watcher.Added(winrt::auto_revoke, bind2(this, &RadioWatcher::OnAdded));
     mUpdatedRevoker = watcher.Updated(winrt::auto_revoke, bind2(this, &RadioWatcher::OnUpdated));
@@ -32,80 +55,68 @@ RadioWatcher::RadioWatcher()
     mCompletedRevoker = watcher.EnumerationCompleted(winrt::auto_revoke, completed);
 }
 
-void RadioWatcher::Start(std::function<void(Radio& radio)> on)
+void RadioWatcher::Start(std::function<void(Radio& radio, const AdapterCapabilities& capabilities)> on)
 {
     radioStateChanged = on;
     inEnumeration = true;
-    initialDone = false;
-    initialCount = 0;
     watcher.Start();
 }
 
-IAsyncOperation<Radio> RadioWatcher::GetRadios(std::set<winrt::hstring> ids)
-{
-    Radio bluetooth = nullptr;
-    for (auto id : ids)
-    {
-        try
-        {
-            auto radio = co_await Radio::FromIdAsync(id);
-            if (radio && radio.Kind() == RadioKind::Bluetooth)
-            {
-                auto state = radio.State();
-                // we only get state changes for turned on/off adapter but not for disabled adapter
-                if (state == RadioState::On || state == RadioState::Off)
-                {
-                    bluetooth = radio;
-                }
-            }
-        }
-        catch (...)
-        {
-            // Radio::RadioFromAsync throws if the device is not available (unplugged)
-        }
-    }
-    co_return bluetooth;
-}
+winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
+    try {
+        auto adapter = co_await BluetoothAdapter::GetDefaultAsync();
+        
+        if (adapter) {
+            auto radio = co_await adapter.GetRadioAsync();
 
-void RadioWatcher::OnRadioChanged()
-{
-    GetRadios(radioIds).Completed([=](auto&& asyncOp, auto&& status) {
-        if (status == AsyncStatus::Completed)
-        {
-            Radio radio = asyncOp.GetResults();
-            // !radio: to handle if there is no radio
-            if (!radio || radio != mRadio)
-            {
-                if (radio)
-                {
-                    mRadioStateChangedRevoker.revoke();
-                    mRadioStateChangedRevoker = radio.StateChanged(
-                        winrt::auto_revoke, [=](Radio radio, auto&&) { radioStateChanged(radio); });
-                }
-                else
-                {
-                    mRadioStateChangedRevoker.revoke();
-                }
-                radioStateChanged(radio);
-                mRadio = radio;
+            AdapterCapabilities capabilities;
+            capabilities.bluetoothAddress = adapter.BluetoothAddress();
+            capabilities.classicSecureConnectionsSupported = adapter.AreClassicSecureConnectionsSupported();
+            capabilities.lowEnergySecureConnectionsSupported = adapter.AreLowEnergySecureConnectionsSupported();
+            capabilities.extendedAdvertisingSupported = adapter.IsExtendedAdvertisingSupported();
+            capabilities.lowEnergySupported = adapter.IsLowEnergySupported();
+            capabilities.maxAdvertisementDataLength = adapter.MaxAdvertisementDataLength();
+            capabilities.peripheralRoleSupported = adapter.IsPeripheralRoleSupported();
+            capabilities.centralRoleSupported = adapter.IsCentralRoleSupported();
+
+            Radio bluetooth = nullptr;
+            if (radio.State() == RadioState::On && adapter.IsPeripheralRoleSupported()) {
+                bluetooth = radio;
             }
-        }
-        else
-        {
+
+            if (!bluetooth || bluetooth != mRadio) {
+                if (bluetooth) {
+                    mRadioStateChangedRevoker.revoke();
+                    mRadioStateChangedRevoker = bluetooth.StateChanged(
+                        winrt::auto_revoke, 
+                        [this, capabilities](Radio radio, auto&&) { 
+                            radioStateChanged(radio, capabilities); 
+                        });
+                } else {
+                    mRadioStateChangedRevoker.revoke();
+                }
+                
+                radioStateChanged(bluetooth, capabilities);
+                mRadio = bluetooth;
+            }
+        } else {
             mRadio = nullptr;
             mRadioStateChangedRevoker.revoke();
-            radioStateChanged(mRadio);
+            AdapterCapabilities emptyCapabilities = {};
+            radioStateChanged(mRadio, emptyCapabilities);
         }
-    });
+    } catch (const winrt::hresult_error&) {
+        mRadio = nullptr;
+        mRadioStateChangedRevoker.revoke();
+        AdapterCapabilities emptyCapabilities = {};
+        radioStateChanged(mRadio, emptyCapabilities);
+    }
 }
 
 void RadioWatcher::OnAdded(DeviceWatcher watcher, DeviceInformation info)
 {
-    radioIds.insert(info.Id());
-    if (!inEnumeration)
-    {
-        OnRadioChanged();
-    }
+    if (inEnumeration) { return; }
+    OnRadioChanged();
 }
 
 void RadioWatcher::OnUpdated(DeviceWatcher watcher, DeviceInformationUpdate info)
@@ -115,7 +126,6 @@ void RadioWatcher::OnUpdated(DeviceWatcher watcher, DeviceInformationUpdate info
 
 void RadioWatcher::OnRemoved(DeviceWatcher watcher, DeviceInformationUpdate info)
 {
-    radioIds.erase(info.Id());
     OnRadioChanged();
 }
 

@@ -2,9 +2,11 @@
 
 #include <string>
 #include <vector>
+
+#include "Peripheral.h"
+
 #import <Foundation/Foundation.h>
 #import <CoreBluetooth/CoreBluetooth.h>
-#include "peripheral.h"
 
 #define IF(type, var, code) type var = code; if(var)
 
@@ -16,7 +18,6 @@
 #else
     std::string stateToString(CBCentralManagerState state);
 #endif
-
 
 NSString* getNSUuid(CBPeripheral* peripheral);
 std::string getUuid(CBPeripheral* peripheral);

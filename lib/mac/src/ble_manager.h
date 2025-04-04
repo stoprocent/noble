@@ -1,21 +1,15 @@
-//
-//  ble_manager.h
-//  noble-mac-native
-//
-//  Created by Georg Vienna on 28.08.18.
-//
-
 #pragma once
 
 #import <Foundation/Foundation.h>
 #import <CoreBluetooth/CoreBluetooth.h>
 #include <dispatch/dispatch.h>
 
-#include "callbacks.h"
+#include "Emit.h"
 
 @interface BLEManager : NSObject <CBCentralManagerDelegate, CBPeripheralDelegate> {
     Emit emit;
     bool pendingRead;
+    bool isScanning;
 }
 @property (strong) CBCentralManager *centralManager;
 @property dispatch_queue_t dispatchQueue;

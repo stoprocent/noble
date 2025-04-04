@@ -2,7 +2,7 @@
 
 #include <napi.h>
 #include "winrt/base.h"
-#include "peripheral.h"
+#include "Peripheral.h"
 
 std::vector<winrt::guid> getUuidArray(const Napi::Value& value);
 bool getBool(const Napi::Value& value, bool def);

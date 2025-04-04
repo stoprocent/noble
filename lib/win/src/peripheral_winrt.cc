@@ -70,9 +70,14 @@ void PeripheralWinrt::ProcessServiceData(const BluetoothLEAdvertisementDataSecti
     data.resize(d.Length() - uuidSize);
     dr.ReadBytes(data);
     
+    // Initialize serviceData if it doesn't exist
+    if (!serviceData.has_value()) {
+        serviceData = std::vector<std::pair<std::string, Data>>();
+    }
+    
     // Find and update existing entry or add new one
     bool found = false;
-    for (auto& pair : serviceData) {
+    for (auto& pair : serviceData.value()) {
         if (pair.first == uuidStr) {
             pair.second = data;
             found = true;
@@ -81,7 +86,7 @@ void PeripheralWinrt::ProcessServiceData(const BluetoothLEAdvertisementDataSecti
     }
     
     if (!found) {
-        serviceData.push_back(std::make_pair(uuidStr, data));
+        serviceData.value().push_back(std::make_pair(uuidStr, data));
     }
     
     dr.Close();
@@ -90,16 +95,20 @@ void PeripheralWinrt::ProcessServiceData(const BluetoothLEAdvertisementDataSecti
 void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement& advertisment,
                              const BluetoothLEAdvertisementType& advertismentType)
 {
+    // Handle name
     std::string localName = ws2s(advertisment.LocalName().c_str());
     if (!localName.empty())
     {
-        name = localName;
+        name = std::optional<std::string>(localName);
     }
 
     connectable = advertismentType == BluetoothLEAdvertisementType::ConnectableUndirected ||
         advertismentType == BluetoothLEAdvertisementType::ConnectableDirected;
 
-    manufacturerData.clear();
+    // Reset optional values
+    manufacturerData = std::nullopt;
+    serviceData = std::nullopt;
+    serviceUuids = std::nullopt;
 
     for (auto ds : advertisment.DataSections())
     {
@@ -107,17 +116,20 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
         {
             auto d = ds.Data();
             auto dr = DataReader::FromBuffer(d);
-            txPowerLevel = dr.ReadByte();
-            if (txPowerLevel >= 128)
-                txPowerLevel -= 256;
+            int power = dr.ReadByte();
+            if (power >= 128)
+                power -= 256;
+            txPowerLevel = std::optional<int>(power);
             dr.Close();
         }
         else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ManufacturerSpecificData())
         {
             auto d = ds.Data();
             auto dr = DataReader::FromBuffer(d);
-            manufacturerData.resize(d.Length());
-            dr.ReadBytes(manufacturerData);
+            Data mData;
+            mData.resize(d.Length());
+            dr.ReadBytes(mData);
+            manufacturerData = std::optional<Data>(mData);
             dr.Close();
         }
         else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ServiceData16BitUuids())
@@ -134,10 +146,15 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
         }
     }
 
-    serviceUuids.clear();
+    // Handle service UUIDs
+    std::vector<std::string> uuids;
     for (auto uuid : advertisment.ServiceUuids())
     {
-        serviceUuids.push_back(toStr(uuid));
+        uuids.push_back(toStr(uuid));
+    }
+    if (!uuids.empty())
+    {
+        serviceUuids = std::optional<std::vector<std::string>>(uuids);
     }
 
     rssi = rssiValue;

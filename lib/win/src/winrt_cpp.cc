@@ -3,7 +3,7 @@
 #include <sstream>
 #include <iomanip>
 
-#include <winrt\Windows.Devices.Bluetooth.h>
+#include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Foundation.Collections.h>
 
 std::string ws2s(const wchar_t* wstr)

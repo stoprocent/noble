@@ -1,14 +1,7 @@
-//
-//  notify_map.h
-//  noble-winrt-native
-//
-//  Created by Georg Vienna on 07.09.18.
-//
-
 #pragma once
 
-#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 #include "winrt_guid.h"
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 
 using namespace winrt::Windows::Devices::Bluetooth::GenericAttributeProfile;
 

@@ -1,8 +1,16 @@
 const noble = require('../');
 
-const directConnect = process.argv[2].toLowerCase();
-const peripheralIdOrAddress = process.argv[3].toLowerCase();
-const addressType = process.argv[4].toLowerCase() || 'random';
+let directConnect = '0';
+let peripheralIdOrAddress = 'cd:6b:86:03:39:40'.toLowerCase();
+let addressType = 'random';
+
+try {
+  directConnect = process.argv[2].toLowerCase() || '0';
+  peripheralIdOrAddress = process.argv[3].toLowerCase() || 'cd:6b:86:03:39:40';
+  addressType = process.argv[4].toLowerCase() || 'random';
+} catch (error) {
+  console.error('Error:', error);
+}
 
 const starTime = Date.now();
 
@@ -13,7 +21,7 @@ async function main () {
       const peripheral = await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''), { addressType });
       await explore(peripheral);
     } else {
-      await noble.startScanningAsync();
+      await noble.startScanningAsync([], false);
     }
   } catch (error) {
     console.error('Error:', error);
@@ -26,8 +34,10 @@ noble.on('discover', async (peripheral) => {
   }
   if ([peripheral.id, peripheral.address].includes(peripheralIdOrAddress)) {
     await noble.stopScanningAsync();
+    await new Promise(resolve => setTimeout(resolve, 10));
     
     console.log(`Peripheral with ID ${peripheral.id} found`);
+    
     const advertisement = peripheral.advertisement;
 
     const localName = advertisement.localName;

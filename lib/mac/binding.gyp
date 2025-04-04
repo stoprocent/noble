@@ -6,14 +6,12 @@
     {
       'target_name': 'binding',
       'sources': [ 
-        'src/noble_mac.mm', 
-        'src/napi_objc.mm', 
-        'src/ble_manager.mm', 
-        'src/objc_cpp.mm', 
-        'src/callbacks.cc' 
+        "<!@(node -p \"require('fs').readdirSync('src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp|mm)$').test(f)).map(f=>'src/'+f).join(' ')\")",
+        "<!@(node -p \"require('fs').readdirSync('../common/src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'../common/src/'+f).join(' ')\")"
       ],
       'include_dirs': [
-        "<!(node -p \"require('node-addon-api').include_dir\")"
+        "<!(node -p \"require('node-addon-api').include_dir\")",
+        "../common/include"
       ],
       'cflags!': [ '-fno-exceptions' ],
       'cflags_cc!': [ '-fno-exceptions' ],
