@@ -18,7 +18,7 @@
       "defines": ["NAPI_CPP_EXCEPTIONS"],
       'xcode_settings': {
         'GCC_ENABLE_CPP_EXCEPTIONS': 'YES',
-        'MACOSX_DEPLOYMENT_TARGET': '11',
+        'MACOSX_DEPLOYMENT_TARGET': '12',
         'CLANG_CXX_LIBRARY': 'libc++',
         'OTHER_CFLAGS': [
           '-fobjc-arc',
