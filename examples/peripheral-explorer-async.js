@@ -79,6 +79,9 @@ noble.on('discover', async (peripheral) => {
 const explore = async (peripheral) => {
   console.log('Services and characteristics:');
 
+  const rssi = await peripheral.updateRssiAsync();
+  console.log('RSSI', rssi);
+
   peripheral.on('disconnect', () => {
     process.exit(0);
   });

@@ -174,12 +174,13 @@
     return NO;
 }
 
-- (void)peripheralDidUpdateRSSI:(CBPeripheral *)peripheral error:(NSError *)error {
+- (void) peripheral:(CBPeripheral *) peripheral 
+        didReadRSSI:(NSNumber *) RSSI 
+              error:(NSError *) error
+{
     std::string uuid = getUuid(peripheral);
-    NSNumber* rssi = peripheral.RSSI;
-    if(!error && rssi) {
-        emit.RSSI(uuid, [rssi longValue]);
-    }
+    int16_t rssi = [RSSI intValue];
+    emit.RSSI(uuid, rssi, error ? error.localizedDescription.UTF8String : "");
 }
 
 #pragma mark - Services

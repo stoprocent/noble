@@ -18,7 +18,7 @@ public:
     void Scan(const std::string& uuid, int rssi, const Peripheral& peripheral);
     void Connected(const std::string& uuid, const std::string& error = "");
     void Disconnected(const std::string& uuid);
-    void RSSI(const std::string& uuid, int rssi);
+    void RSSI(const std::string& uuid, int rssi, const std::string& error = "");
     void ServicesDiscovered(const std::string& uuid, const std::vector<std::string>& serviceUuids, const std::string& error = "");
     void IncludedServicesDiscovered(const std::string& uuid, const std::string& serviceUuid, const std::vector<std::string>& serviceUuids, const std::string& error = "");
     void CharacteristicsDiscovered(const std::string& uuid, const std::string& serviceUuid, const std::vector<std::pair<std::string, std::vector<std::string>>>& characteristics, const std::string& error = "");

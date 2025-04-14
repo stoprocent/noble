@@ -162,11 +162,11 @@ void Emit::Disconnected(const std::string& uuid)
     });
 }
 
-void Emit::RSSI(const std::string& uuid, int rssi)
+void Emit::RSSI(const std::string& uuid, int rssi, const std::string& error)
 {
-    mCallback->call([uuid, rssi](Napi::Env env, std::vector<napi_value>& args) {
+    mCallback->call([uuid, rssi, error](Napi::Env env, std::vector<napi_value>& args) {
         // emit('rssiUpdate', deviceUuid, rssi);
-        args = { _s("rssiUpdate"), _u(uuid), _n(rssi) };
+        args = { _s("rssiUpdate"), _u(uuid), _n(rssi), error.empty() ? env.Null() : _e(error) };
     });
 }
 
