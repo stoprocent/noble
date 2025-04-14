@@ -256,9 +256,38 @@ bool BLEManager::Connect(const std::string& uuid)
 {
     if (mDeviceMap.find(uuid) == mDeviceMap.end())
     {
-        mEmit.Connected(uuid, "device not found");
-        return false;
+        // Convert UUID string to MAC address format
+        // Remove any colons if present and convert to uppercase
+        std::string cleanUuid = uuid;
+        cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
+        
+        // Basic validation
+        if (cleanUuid.length() != 12) {
+            mEmit.Connected(uuid, "invalid device address format");
+            return false;
+        }
+
+        try {
+            // Convert string to uint64_t bluetooth address
+            uint64_t bluetoothAddress = std::stoull(cleanUuid, nullptr, 16);
+            
+            // Create a new peripheral entry as if it was scanned
+            auto peripheral = PeripheralWinrt(bluetoothAddress, 
+                                            BluetoothLEAdvertisementType::ConnectableUndirected, 
+                                            127,  // default RSSI for direct connect
+                                            BluetoothLEAdvertisement()); // empty advertisement
+            
+            // Emit scan event just like during normal scanning
+            mEmit.Scan(uuid, 127, peripheral);
+            
+            // Add to device map
+            mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
+        } catch (const std::exception& e) {
+            mEmit.Connected(uuid, "invalid device address format");
+            return false;
+        }
     }
+
     PeripheralWinrt& peripheral = mDeviceMap[uuid];
     if (!peripheral.device.has_value())
     {
