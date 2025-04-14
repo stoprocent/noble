@@ -34,7 +34,6 @@ noble.on('discover', async (peripheral) => {
   }
   if ([peripheral.id, peripheral.address].includes(peripheralIdOrAddress)) {
     await noble.stopScanningAsync();
-    await new Promise(resolve => setTimeout(resolve, 10));
     
     console.log(`Peripheral with ID ${peripheral.id} found`);
     
