@@ -1,5 +1,6 @@
 #include "noble_winrt.h"
 #include "napi_winrt.h"
+#include "winrt_cpp.h"
 
 #define THROW(msg)                                                      \
     Napi::TypeError::New(info.Env(), msg).ThrowAsJavaScriptException(); \
@@ -99,6 +100,16 @@ Napi::Value NobleWinrt::Disconnect(const Napi::CallbackInfo& info)
     ARG1(String)
     auto uuid = info[0].As<Napi::String>().Utf8Value();
     manager->Disconnect(uuid);
+    return info.Env().Undefined();
+}
+
+// cancelConnect(deviceUuid)
+Napi::Value NobleWinrt::CancelConnect(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    ARG1(String)
+    auto uuid = info[0].As<Napi::String>().Utf8Value();
+    manager->CancelConnect(uuid);
     return info.Env().Undefined();
 }
 
@@ -248,6 +259,29 @@ Napi::Value NobleWinrt::WriteHandle(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
+// addressToId(address)
+Napi::Value NobleWinrt::AddressToId(const Napi::CallbackInfo& info)
+{
+    ARG1(String)
+    try {
+        auto address = info[0].As<Napi::String>().Utf8Value();
+        std::string cleanUuid = address;
+        cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
+        
+        if (cleanUuid.length() != 12) {
+            return info.Env().Null();
+        }
+        
+        if (cleanUuid.find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos) {
+            return info.Env().Null();
+        }
+        
+        return Napi::String::New(info.Env(), cleanUuid.c_str());
+    } catch (const std::exception& e) {
+        return info.Env().Null();
+    }
+}
+
 #pragma comment(lib, "windowsapp")
 Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
     Napi::HandleScope scope(env);
@@ -269,10 +303,12 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
 
     Napi::Function func = DefineClass(env, "NobleWinrt", {
         NobleWinrt::InstanceMethod("start", &NobleWinrt::Start),
+        NobleWinrt::InstanceMethod("stop", &NobleWinrt::Stop),
         NobleWinrt::InstanceMethod("startScanning", &NobleWinrt::Scan),
         NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
         NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
         NobleWinrt::InstanceMethod("disconnect", &NobleWinrt::Disconnect),
+        NobleWinrt::InstanceMethod("cancelConnect", &NobleWinrt::CancelConnect),
         NobleWinrt::InstanceMethod("updateRssi", &NobleWinrt::UpdateRSSI),
         NobleWinrt::InstanceMethod("discoverServices", &NobleWinrt::DiscoverServices),
         NobleWinrt::InstanceMethod("discoverIncludedServices", &NobleWinrt::DiscoverIncludedServices),
@@ -285,7 +321,7 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
         NobleWinrt::InstanceMethod("writeValue", &NobleWinrt::WriteValue),
         NobleWinrt::InstanceMethod("readHandle", &NobleWinrt::ReadHandle),
         NobleWinrt::InstanceMethod("writeHandle", &NobleWinrt::WriteHandle),
-        NobleWinrt::InstanceMethod("stop", &NobleWinrt::Stop),
+        NobleWinrt::InstanceMethod("addressToId", &NobleWinrt::AddressToId),
         });
 
     Napi::FunctionReference* constructor = new Napi::FunctionReference();

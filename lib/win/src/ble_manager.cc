@@ -340,6 +340,15 @@ bool BLEManager::Disconnect(const std::string& uuid)
     return true;
 }
 
+bool BLEManager::CancelConnect(const std::string& uuid)
+{
+    CHECK_DEVICE();
+    PeripheralWinrt& peripheral = mDeviceMap[uuid];
+    peripheral.Disconnect();
+    mNotifyMap.Remove(uuid);
+    return true;
+}
+
 void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
                                            winrt::Windows::Foundation::IInspectable inspectable)
 {

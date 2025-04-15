@@ -22,6 +22,7 @@ public:
     void StopScan();
     bool Connect(const std::string& uuid);
     bool Disconnect(const std::string& uuid);
+    bool CancelConnect(const std::string& uuid);
     bool UpdateRSSI(const std::string& uuid);
     bool DiscoverServices(const std::string& uuid, const std::vector<winrt::guid>& serviceUUIDs);
     bool DiscoverIncludedServices(const std::string& uuid, const winrt::guid& serviceUuid, const std::vector<winrt::guid>& serviceUUIDs);
