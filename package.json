@@ -72,9 +72,6 @@
     "coverage": "nyc npm test && nyc report --reporter=text-lcov > .nyc_output/lcov.info",
     "test": "cross-env NODE_ENV=test mocha --recursive \"test/*.test.js\" \"test/**/*.test.js\" --exit"
   },
-  "browser": {
-    "./lib/resolve-bindings.js": "./lib/resolve-bindings-web.js"
-  },
   "publishConfig": {
     "access": "public"
   }
