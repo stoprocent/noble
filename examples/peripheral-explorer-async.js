@@ -14,17 +14,25 @@ try {
 
 const starTime = Date.now();
 
+var peripheral;
 async function main () {
   try {
-    await noble.waitForPoweredOn();
+    await noble.waitForPoweredOnAsync();
+
+    // Cancel the connection after 5 seconds if it is still connecting
+    setTimeout(() => {
+      noble.cancelConnect(peripheralIdOrAddress);
+    }, 5000);
+
     if (directConnect === '1') {
-      const peripheral = await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''), { addressType });
+      peripheral = await noble.connectAsync(peripheralIdOrAddress, { addressType });
       await explore(peripheral);
     } else {
       await noble.startScanningAsync([], false);
     }
   } catch (error) {
     console.error('Error:', error);
+    process.exit(1);
   }
 }
 
