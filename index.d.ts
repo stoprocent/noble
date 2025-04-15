@@ -1,217 +1,262 @@
-// Type definitions for noble
-// Project: https://github.com/sandeepmistry/noble
-// Definitions by: Seon-Wook Park <https://github.com/swook>
-//                 Shantanu Bhadoria <https://github.com/shantanubhadoria>
-//                 Luke Libraro <https://github.com/lukel99>
-//                 Dan Chao <https://github.com/bioball>
-//                 Michal Lower <https://github.com/keton>
-//                 Rob Moran <https://github.com/thegecko>
-//                 Clayton Kucera <https://github.com/claytonkucera>
-// Definitions: https://github.com/DefinitelyTyped/DefinitelyTyped
-
 /// <reference types="node" />
-
-import events = require("events");
-
-export interface ConnectOptions {
-  addressType?: 'public' | 'random';
-  minInterval?: number;
-  maxInterval?: number;
-  latency?: number;
-  timeout?: number;
+declare module '@stoprocent/bluetooth-hci-socket' {
+    type DriverType = any; // Fallback type
+    interface BindParams {
+        [key: string]: any;
+    }
 }
 
-export declare function waitForPoweredOn(timeout?: number): Promise<void>;
-/**
- * @deprecated
- */
-export declare function startScanning(callback?: (error?: Error) => void): void;
-/**
- * @deprecated
- */
-export declare function startScanning(serviceUUIDs: string[], callback?: (error?: Error) => void): void;
-export declare function startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
-export declare function startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
-export declare function stopScanning(callback?: () => void): void;
-export declare function stopScanningAsync(): Promise<void>;
-export declare function connect(peripheralUuid: string, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
-export declare function connectAsync(peripheralUuid: string, options?: ConnectOptions): Promise<Peripheral>;
-export declare function cancelConnect(peripheralUuid: string, options?: object): void;
-export declare function reset(): void;
-export declare function stop(): void;
+declare module '@stoprocent/noble' {
+    import { EventEmitter } from 'events';
 
-export declare function setAddress(address: string): void;
+    export type AdapterState = 'poweredOn' | 'poweredOff' | 'unauthorized' | 'unsupported' | 'unknown' | 'resetting';
+    
+    export type PeripheralState = 'error' | 'connecting' | 'connected' | 'disconnecting' | 'disconnected';
 
-export declare function on(event: "stateChange", listener: (state: string) => void): events.EventEmitter;
-export declare function on(event: "scanStart", listener: () => void): events.EventEmitter;
-export declare function on(event: "scanStop", listener: () => void): events.EventEmitter;
-export declare function on(event: "discover", listener: (peripheral: Peripheral) => void): events.EventEmitter;
-export declare function on(event: string, listener: Function): events.EventEmitter;
+    export type PeripheralAddressType = 'public' | 'random';
 
-export declare function once(event: "stateChange", listener: (state: string) => void): events.EventEmitter;
-export declare function once(event: "scanStart", listener: () => void): events.EventEmitter;
-export declare function once(event: "scanStop", listener: () => void): events.EventEmitter;
-export declare function once(event: "discover", listener: (peripheral: Peripheral) => void): events.EventEmitter;
-export declare function once(event: string, listener: Function): events.EventEmitter;
+    export type PeripheralIdOrAddress = string;
 
-export declare function removeListener(event: "stateChange", listener: (state: string) => void): events.EventEmitter;
-export declare function removeListener(event: "scanStart", listener: () => void): events.EventEmitter;
-export declare function removeListener(event: "scanStop", listener: () => void): events.EventEmitter;
-export declare function removeListener(event: "discover", listener: (peripheral: Peripheral) => void): events.EventEmitter;
-export declare function removeListener(event: string, listener: Function): events.EventEmitter;
+    export interface ConnectOptions {
+        addressType?: PeripheralAddressType;
+        minInterval?: number;
+        maxInterval?: number;
+        latency?: number;
+        timeout?: number;
+    }
 
-export declare function removeAllListeners(event?: string): events.EventEmitter;
+    export class Noble extends EventEmitter {
+    
+        constructor(bindings: any);
+        
+        readonly state: State;
+        readonly address: string;
+    
+        waitForPoweredOnAsync(timeout?: number): Promise<void>;
+        startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
+        stopScanningAsync(): Promise<void>;
+        connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
+    
+        startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
+        stopScanning(callback?: () => void): void;
+        connect(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
+        cancelConnect(idOrAddress: PeripheralIdOrAddress, options?: object): void;
+        reset(): void;
+        stop(): void;
+        setAddress(address: string): void;
+    
+        on(event: "stateChange", listener: (state: State) => void): this;
+        on(event: "scanStart", listener: () => void): this;
+        on(event: "scanStop", listener: () => void): this;
+        on(event: "discover", listener: (peripheral: Peripheral) => void): this;
+        on(event: string, listener: Function): this;
+    
+        once(event: "stateChange", listener: (state: State) => void): this;
+        once(event: "scanStart", listener: () => void): this;
+        once(event: "scanStop", listener: () => void): this;
+        once(event: "discover", listener: (peripheral: Peripheral) => void): this;
+        once(event: string, listener: Function): this;
+    
+        removeListener(event: "stateChange", listener: (state: State) => void): this;
+        removeListener(event: "scanStart", listener: () => void): this;
+        removeListener(event: "scanStop", listener: () => void): this;
+        removeListener(event: "discover", listener: (peripheral: Peripheral) => void): this;
+        removeListener(event: string, listener: Function): this;
+    }
 
-export var state: "unknown" | "resetting" | "unsupported" | "unauthorized" | "poweredOff" | "poweredOn";
+    export interface ServicesAndCharacteristics {
+        services: Service[];
+        characteristics: Characteristic[];
+    }
+    
+    export interface PeripheralAdvertisement {
+        localName: string;
+        serviceData: Array<{
+            uuid: string,
+            data: Buffer
+        }>;
+        txPowerLevel: number;
+        manufacturerData: Buffer;
+        serviceUuids: string[];
+    }
 
-export interface ServicesAndCharacteristics {
-  services: Service[];
-  characteristics: Characteristic[];
+    export class Peripheral extends EventEmitter {
+        readonly id: string;
+        readonly address: string;
+        readonly addressType: PeripheralAddressType;
+        readonly connectable: boolean;
+        readonly advertisement: PeripheralAdvertisement;
+        readonly rssi: number;
+        readonly mtu: number | null;
+        readonly services: Service[];
+        readonly state: PeripheralState;
+
+        /** @deprecated Use id instead */
+        readonly uuid: string;
+    
+        connectAsync(): Promise<void>;
+        disconnectAsync(): Promise<void>;
+        updateRssiAsync(): Promise<number>;
+        discoverServicesAsync(): Promise<Service[]>;
+        discoverServicesAsync(serviceUUIDs: string[]): Promise<Service[]>;
+        discoverAllServicesAndCharacteristicsAsync(): Promise<ServicesAndCharacteristics>;
+        discoverSomeServicesAndCharacteristicsAsync(serviceUUIDs: string[], characteristicUUIDs: string[]): Promise<ServicesAndCharacteristics>;
+        readHandleAsync(handle: number): Promise<Buffer>;
+        writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
+
+        connect(callback?: (error: Error | undefined) => void): void;
+        disconnect(callback?: () => void): void;
+        updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
+        discoverServices(): void;
+        discoverServices(serviceUUIDs: string[], callback?: (error: Error | undefined, services: Service[]) => void): void;
+        discoverAllServicesAndCharacteristics(callback?: (error: Error | undefined, services: Service[], characteristics: Characteristic[]) => void): void;
+        discoverSomeServicesAndCharacteristics(serviceUUIDs: string[], characteristicUUIDs: string[], callback?: (error: Error | undefined, services: Service[], characteristics: Characteristic[]) => void): void;        
+        readHandle(handle: number, callback: (error: Error | undefined, data: Buffer) => void): void;
+        writeHandle(handle: number, data: Buffer, withoutResponse: boolean, callback: (error: Error | undefined) => void): void;
+        
+        cancelConnect(options?: object): void;
+        toString(): string;
+    
+        on(event: "connect", listener: (error: Error | undefined) => void): this;
+        on(event: "disconnect", listener: (error: Error | undefined) => void): this;
+        on(event: "rssiUpdate", listener: (rssi: number) => void): this;
+        on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
+        on(event: "mtu", listener: (mtu: number) => void): this;
+        on(event: string, listener: Function): this;
+    
+        once(event: "connect", listener: (error: Error | undefined) => void): this;
+        once(event: "disconnect", listener: (error: Error | undefined) => void): this;
+        once(event: "rssiUpdate", listener: (rssi: number) => void): this;
+        once(event: "servicesDiscover", listener: (services: Service[]) => void): this;
+        once(event: string, listener: Function): this;
+    }
+
+    export class Service extends EventEmitter {
+
+        readonly uuid: string;
+        readonly name: string;
+        readonly type: string;
+        readonly includedServiceUuids: string[];
+        readonly characteristics: Characteristic[];
+    
+        discoverIncludedServicesAsync(): Promise<string[]>;
+        discoverIncludedServicesAsync(serviceUUIDs: string[]): Promise<string[]>;
+        discoverCharacteristicsAsync(): Promise<Characteristic[]>;
+        discoverCharacteristicsAsync(characteristicUUIDs: string[]): Promise<Characteristic[]>;
+        
+        discoverIncludedServices(): void;
+        discoverIncludedServices(serviceUUIDs: string[], callback?: (error: Error | undefined, includedServiceUuids: string[]) => void): void;
+        discoverCharacteristics(): void;
+        discoverCharacteristics(characteristicUUIDs: string[], callback?: (error: Error | undefined, characteristics: Characteristic[]) => void): void;
+        
+        toString(): string;
+    
+        on(event: "includedServicesDiscover", listener: (includedServiceUuids: string[]) => void): this;
+        on(event: "characteristicsDiscover", listener: (characteristics: Characteristic[]) => void): this;
+        on(event: string, listener: Function): this;
+    
+        once(event: "includedServicesDiscover", listener: (includedServiceUuids: string[]) => void): this;
+        once(event: "characteristicsDiscover", listener: (characteristics: Characteristic[]) => void): this;
+        once(event: string, listener: Function): this;
+    }
+    
+    export class Characteristic extends EventEmitter {
+        
+        readonly uuid: string;
+        readonly name: string;
+        readonly type: string;
+        readonly properties: string[];
+        readonly descriptors: Descriptor[];
+    
+        readAsync(): Promise<Buffer>;
+        writeAsync(data: Buffer, withoutResponse: boolean): Promise<void>;
+        broadcastAsync(broadcast: boolean): Promise<void>;
+        notifyAsync(notify: boolean): Promise<void>;
+        discoverDescriptorsAsync(): Promise<Descriptor[]>;
+        subscribeAsync(): Promise<void>;
+        unsubscribeAsync(): Promise<void>;
+        
+        read(callback?: (error: Error | undefined, data: Buffer) => void): void;
+        write(data: Buffer, withoutResponse: boolean, callback?: (error: Error | undefined) => void): void;
+        broadcast(broadcast: boolean, callback?: (error: Error | undefined) => void): void;
+        notify(notify: boolean, callback?: (error: Error | undefined) => void): void;
+        discoverDescriptors(callback?: (error: Error | undefined, descriptors: Descriptor[]) => void): void;
+        subscribe(callback?: (error: Error | undefined) => void): void;
+        unsubscribe(callback?: (error: Error | undefined) => void): void;
+        
+        toString(): string;
+        
+        on(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
+        on(event: "write", withoutResponse: boolean, listener: (error: Error | undefined) => void): this;
+        on(event: "broadcast", listener: (state: string) => void): this;
+        on(event: "notify", listener: (state: string) => void): this;
+        on(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
+        on(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
+        on(event: string, listener: Function): this;
+    
+        once(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
+        once(event: "write", withoutResponse: boolean, listener: (error: Error | undefined) => void): this;
+        once(event: "broadcast", listener: (state: string) => void): this;
+        once(event: "notify", listener: (state: string) => void): this;
+        once(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
+        once(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
+        once(event: string, listener: Function): this;
+    }
+    
+    export class Descriptor extends EventEmitter {
+        readonly uuid: string;
+        readonly name: string;
+        readonly type: string;
+    
+        readValueAsync(): Promise<Buffer>;
+        writeValueAsync(data: Buffer): Promise<void>;
+
+        readValue(callback?: (error: Error | undefined, data: Buffer) => void): void;
+        writeValue(data: Buffer, callback?: (error: Error | undefined) => void): void;
+        
+        toString(): string;
+    
+        on(event: "valueRead", listener: (error: Error | undefined, data: Buffer) => void): this;
+        on(event: "valueWrite", listener: (error: Error | undefined) => void): this;
+        on(event: string, listener: Function): this;
+    
+        once(event: "valueRead", listener: (error: Error | undefined, data: Buffer) => void): this;
+        once(event: "valueWrite", listener: (error: Error | undefined) => void): this;
+        once(event: string, listener: Function): this;
+    }
+
+    /*
+    * Binding
+    */
+
+    export type BindingType = 'default' | 'hci' | 'mac' | 'win';
+
+    export interface BaseBindingsOptions {}
+
+    export interface HciBindingsOptions extends BaseBindingsOptions {
+        hciDriver?: import('@stoprocent/bluetooth-hci-socket').DriverType;
+        bindParams?: import('@stoprocent/bluetooth-hci-socket').BindParams;
+    }
+
+    export interface MacBindingsOptions extends BaseBindingsOptions {}
+    export interface WinBindingsOptions extends BaseBindingsOptions {}
+
+    export type WithBindingsOptions = HciBindingsOptions | MacBindingsOptions | WinBindingsOptions;
+
+    export function withBindings(
+        bindingType?: BindingType, 
+        options?: WithBindingsOptions
+    ): Noble;
+
+    // Define a default export
+    const NobleDefault: Noble;
+    export default NobleDefault;
 }
 
-export declare class Peripheral extends events.EventEmitter {
-    id: string;
-    uuid: string;
-    address: string;
-    addressType: string;
-    connectable: boolean;
-    advertisement: Advertisement;
-    rssi: number;
-    mtu: number | null;
-    services: Service[];
-    state: 'error' | 'connecting' | 'connected' | 'disconnecting' | 'disconnected';
 
-    connect(callback?: (error: string) => void): void;
-    connectAsync(): Promise<void>;
-    disconnect(callback?: () => void): void;
-    disconnectAsync(): Promise<void>;
-    updateRssi(callback?: (error: string, rssi: number) => void): void;
-    updateRssiAsync(): Promise<number>;
-    discoverServices(): void;
-    discoverServicesAsync(): Promise<Service[]>;
-    discoverServices(serviceUUIDs: string[], callback?: (error: string, services: Service[]) => void): void;
-    discoverServicesAsync(serviceUUIDs: string[]): Promise<Service[]>;
-    discoverAllServicesAndCharacteristics(callback?: (error: string, services: Service[], characteristics: Characteristic[]) => void): void;
-    discoverAllServicesAndCharacteristicsAsync(): Promise<ServicesAndCharacteristics>;
-    discoverSomeServicesAndCharacteristics(serviceUUIDs: string[], characteristicUUIDs: string[], callback?: (error: string, services: Service[], characteristics: Characteristic[]) => void): void;
-    discoverSomeServicesAndCharacteristicsAsync(serviceUUIDs: string[], characteristicUUIDs: string[]): Promise<ServicesAndCharacteristics>;
-    cancelConnect(options?: object): void;
 
-    readHandle(handle: number, callback: (error: string, data: Buffer) => void): void;
-    readHandleAsync(handle: number): Promise<Buffer>;
-    writeHandle(handle: number, data: Buffer, withoutResponse: boolean, callback: (error: string) => void): void;
-    writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
-    toString(): string;
 
-    on(event: "connect", listener: (error: string) => void): this;
-    on(event: "disconnect", listener: (error: string) => void): this;
-    on(event: "rssiUpdate", listener: (rssi: number) => void): this;
-    on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
-    on(event: "mtu", listener: (mtu: number) => void): this;
-    on(event: string, listener: Function): this;
 
-    once(event: "connect", listener: (error: string) => void): this;
-    once(event: "disconnect", listener: (error: string) => void): this;
-    once(event: "rssiUpdate", listener: (rssi: number) => void): this;
-    once(event: "servicesDiscover", listener: (services: Service[]) => void): this;
-    once(event: string, listener: Function): this;
-}
 
-export interface Advertisement {
-    localName: string;
-    serviceData: Array<{
-        uuid: string,
-        data: Buffer
-    }>;
-    txPowerLevel: number;
-    manufacturerData: Buffer;
-    serviceUuids: string[];
-}
 
-export declare class Service extends events.EventEmitter {
-    uuid: string;
-    name: string;
-    type: string;
-    includedServiceUuids: string[];
-    characteristics: Characteristic[];
 
-    discoverIncludedServices(): void;
-    discoverIncludedServicesAsync(): Promise<string[]>;
-    discoverIncludedServices(serviceUUIDs: string[], callback?: (error: string, includedServiceUuids: string[]) => void): void;
-    discoverIncludedServicesAsync(serviceUUIDs: string[]): Promise<string[]>;
-    discoverCharacteristics(): void;
-    discoverCharacteristicsAsync(): Promise<Characteristic[]>;
-    discoverCharacteristics(characteristicUUIDs: string[], callback?: (error: string, characteristics: Characteristic[]) => void): void;
-    discoverCharacteristicsAsync(characteristicUUIDs: string[]): Promise<Characteristic[]>;
-    toString(): string;
-
-    on(event: "includedServicesDiscover", listener: (includedServiceUuids: string[]) => void): this;
-    on(event: "characteristicsDiscover", listener: (characteristics: Characteristic[]) => void): this;
-    on(event: string, listener: Function): this;
-
-    once(event: "includedServicesDiscover", listener: (includedServiceUuids: string[]) => void): this;
-    once(event: "characteristicsDiscover", listener: (characteristics: Characteristic[]) => void): this;
-    once(event: string, listener: Function): this;
-}
-
-export declare class Characteristic extends events.EventEmitter {
-    uuid: string;
-    name: string;
-    type: string;
-    properties: string[];
-    descriptors: Descriptor[];
-
-    read(callback?: (error: string, data: Buffer) => void): void;
-    readAsync(): Promise<Buffer>;
-    write(data: Buffer, withoutResponse: boolean, callback?: (error: string) => void): void;
-    writeAsync(data: Buffer, withoutResponse: boolean): Promise<void>;
-    broadcast(broadcast: boolean, callback?: (error: string) => void): void;
-    broadcastAsync(broadcast: boolean): Promise<void>;
-    notify(notify: boolean, callback?: (error: string) => void): void;
-    notifyAsync(notify: boolean): Promise<void>;
-    discoverDescriptors(callback?: (error: string, descriptors: Descriptor[]) => void): void;
-    discoverDescriptorsAsync(): Promise<Descriptor[]>;
-    toString(): string;
-    subscribe(callback?: (error: string) => void): void;
-    subscribeAsync(): Promise<void>;
-    unsubscribe(callback?: (error: string) => void): void;
-    unsubscribeAsync(): Promise<void>;
-
-    on(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
-    on(event: "write", withoutResponse: boolean, listener: (error: string) => void): this;
-    on(event: "broadcast", listener: (state: string) => void): this;
-    on(event: "notify", listener: (state: string) => void): this;
-    on(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
-    on(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
-    on(event: string, listener: Function): this;
-    on(event: string, option: boolean, listener: Function): this;
-
-    once(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
-    once(event: "write", withoutResponse: boolean, listener: (error: string) => void): this;
-    once(event: "broadcast", listener: (state: string) => void): this;
-    once(event: "notify", listener: (state: string) => void): this;
-    once(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
-    once(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
-    once(event: string, listener: Function): this;
-    once(event: string, option: boolean, listener: Function): this;
-}
-
-export declare class Descriptor extends events.EventEmitter {
-    uuid: string;
-    name: string;
-    type: string;
-
-    readValue(callback?: (error: string, data: Buffer) => void): void;
-    readValueAsync(): Promise<Buffer>;
-    writeValue(data: Buffer, callback?: (error: string) => void): void;
-    writeValueAsync(data: Buffer): Promise<void>;
-    toString(): string;
-
-    on(event: "valueRead", listener: (error: string, data: Buffer) => void): this;
-    on(event: "valueWrite", listener: (error: string) => void): this;
-    on(event: string, listener: Function): this;
-
-    once(event: "valueRead", listener: (error: string, data: Buffer) => void): this;
-    once(event: "valueWrite", listener: (error: string) => void): this;
-    once(event: string, listener: Function): this;
-}
