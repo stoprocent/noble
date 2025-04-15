@@ -91,6 +91,16 @@ Napi::Value NobleMac::Disconnect(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
+// cancelConnect(deviceUuid)
+Napi::Value NobleMac::CancelConnect(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    ARG1(String)
+    auto uuid = napiToUuidString(info[0].As<Napi::String>());
+    [manager disconnect:uuid];
+    return info.Env().Undefined();
+}
+
 // updateRssi(deviceUuid)
 Napi::Value NobleMac::UpdateRSSI(const Napi::CallbackInfo& info) 
 {
@@ -242,16 +252,35 @@ Napi::Value NobleMac::WriteHandle(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
+// addressToId(address)
+Napi::Value NobleMac::AddressToId(const Napi::CallbackInfo& info) 
+{
+    ARG1(String)
+    auto address = info[0].As<Napi::String>().Utf8Value();
+    NSMutableString * uuidString = [[NSMutableString alloc] initWithCString:address.c_str() encoding:NSASCIIStringEncoding];
+    if ([uuidString containsString:@"-"]) {
+        NSUUID* uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
+        if (uuid) {
+            NSString* canonical = uuid.UUIDString;
+            NSString* result = [[canonical stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];
+            return Napi::String::New(info.Env(), [result UTF8String]);
+        }
+    }
+    return info.Env().Null();
+}
+
 Napi::Object NobleMac::Init(Napi::Env env, Napi::Object exports) 
 {
     Napi::HandleScope scope(env);
 
     Napi::Function func = DefineClass(env, "NobleMac", {
         NobleMac::InstanceMethod("start", &NobleMac::Start),
+        NobleMac::InstanceMethod("stop", &NobleMac::Stop),
         NobleMac::InstanceMethod("startScanning", &NobleMac::Scan),
         NobleMac::InstanceMethod("stopScanning", &NobleMac::StopScan),
         NobleMac::InstanceMethod("connect", &NobleMac::Connect),
         NobleMac::InstanceMethod("disconnect", &NobleMac::Disconnect),
+        NobleMac::InstanceMethod("cancelConnect", &NobleMac::CancelConnect),
         NobleMac::InstanceMethod("updateRssi", &NobleMac::UpdateRSSI),
         NobleMac::InstanceMethod("discoverServices", &NobleMac::DiscoverServices),
         NobleMac::InstanceMethod("discoverIncludedServices", &NobleMac::DiscoverIncludedServices),
@@ -264,7 +293,7 @@ Napi::Object NobleMac::Init(Napi::Env env, Napi::Object exports)
         NobleMac::InstanceMethod("writeValue", &NobleMac::WriteValue),
         NobleMac::InstanceMethod("readHandle", &NobleMac::ReadHandle),
         NobleMac::InstanceMethod("writeHandle", &NobleMac::WriteHandle),
-        NobleMac::InstanceMethod("stop", &NobleMac::Stop),
+        NobleMac::InstanceMethod("addressToId", &NobleMac::AddressToId),
     });
 
     Napi::FunctionReference* constructor = new Napi::FunctionReference();
