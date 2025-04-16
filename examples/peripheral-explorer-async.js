@@ -44,7 +44,7 @@ noble.on('discover', async (peripheral) => {
     await noble.stopScanningAsync();
     
     console.log(`Peripheral with ID ${peripheral.id} found`);
-    
+
     const advertisement = peripheral.advertisement;
 
     const localName = advertisement.localName;
@@ -87,16 +87,17 @@ noble.on('discover', async (peripheral) => {
 const explore = async (peripheral) => {
   console.log('Services and characteristics:');
 
-  const rssi = await peripheral.updateRssiAsync();
-  console.log('RSSI', rssi);
-
-  peripheral.on('disconnect', () => {
+  peripheral.on('disconnect', (reason) => {
+    console.log('Disconnected', reason);
     process.exit(0);
   });
 
   if (peripheral.state !== 'connected') {
     await peripheral.connectAsync();
   }
+
+  const rssi = await peripheral.updateRssiAsync();
+  console.log('RSSI', rssi);
 
   const services = await peripheral.discoverServicesAsync([]);
 

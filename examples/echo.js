@@ -11,94 +11,84 @@ const noble = require('..');
 const ECHO_SERVICE_UUID = 'ec00';
 const ECHO_CHARACTERISTIC_UUID = 'ec0e';
 
-noble.on('stateChange', (state) => {
-  if (state === 'poweredOn') {
+async function main() {
+  try {
+    // Wait for the BLE adapter to be ready
+    console.log('Waiting for powered on');
+    await noble.waitForPoweredOnAsync();
+    console.log('Powered on');
+    await noble.setAddress('11:22:33:44:55:66');
+    console.log('Set address');
+    await noble.startScanningAsync([ECHO_SERVICE_UUID], false);
     console.log('Scanning');
-    noble.startScanning([ECHO_SERVICE_UUID], false);
-  } else {
-    noble.stopScanning();
+  } catch (error) {
+    console.error('Error initializing BLE:', error);
+    process.exit(1);
   }
-});
+}
 
 noble.on('discover', (peripheral) => {
   // connect to the first peripheral that is scanned
-  noble.stopScanning();
+  noble.stopScanningAsync();
   const name = peripheral.advertisement.localName;
   console.log(`Connecting to '${name}' ${peripheral.id}`);
   connectAndSetUp(peripheral);
 });
 
-function connectAndSetUp (peripheral) {
-  peripheral.connect((error) => {
-    if (error) {
-      console.error(error);
+async function connectAndSetUp(peripheral) {
+  try {
+    await peripheral.connectAsync();
+    console.log('Connected to', peripheral.id);
+
+    // // specify the services and characteristics to discover
+    const { services, characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+      [ECHO_SERVICE_UUID],
+      [ECHO_CHARACTERISTIC_UUID]
+    );
+
+    console.log('Discovered services and characteristics');
+    const echoCharacteristic = characteristics[0];
+
+    // data callback receives notifications
+    echoCharacteristic.on('read', (data, isNotification) => {
+      console.log(`Received: "${data}"`);
+    });
+
+    // subscribe to be notified whenever the peripheral update the characteristic
+    try {
+      await echoCharacteristic.subscribeAsync();
+      console.log('Subscribed for echoCharacteristic notifications');
+    } catch (error) {
+      console.error('Error subscribing to echoCharacteristic:', error);
       return;
     }
 
-    console.log('Connected to', peripheral.id);
+    // create an interval to send data to the service
+    let count = 0;
+    setInterval(async () => {
+      count++;
+      const message = Buffer.from(`hello, ble ${count}`, 'utf-8');
+      console.log(`Sending:  '${message}'`);
+      await echoCharacteristic.writeAsync(message, false);
+    }, 2500);
 
-    // specify the services and characteristics to discover
-    const serviceUUIDs = [ECHO_SERVICE_UUID];
-    const characteristicUUIDs = [ECHO_CHARACTERISTIC_UUID];
-
-    peripheral.discoverSomeServicesAndCharacteristics(
-      serviceUUIDs,
-      characteristicUUIDs,
-      onServicesAndCharacteristicsDiscovered
-    );
-  });
+  } catch (error) {
+    console.error('Error during connection setup:', error);
+  }
 
   peripheral.on('disconnect', () => console.log('disconnected'));
 }
 
-function onServicesAndCharacteristicsDiscovered (
-  error,
-  services,
-  characteristics
-) {
-  if (error) {
-    console.error(error);
-    return;
-  }
-
-  console.log('Discovered services and characteristics');
-  const echoCharacteristic = characteristics[0];
-
-  // data callback receives notifications
-  echoCharacteristic.on('data', (data, isNotification) => {
-    console.log(`Received: "${data}"`);
-  });
-
-  // subscribe to be notified whenever the peripheral update the characteristic
-  echoCharacteristic.subscribe((error) => {
-    if (error) {
-      console.error('Error subscribing to echoCharacteristic');
-    } else {
-      console.log('Subscribed for echoCharacteristic notifications');
-    }
-  });
-
-  // create an interval to send data to the service
-  let count = 0;
-  setInterval(() => {
-    count++;
-    const message = Buffer.from(`hello, ble ${count}`, 'utf-8');
-    console.log(`Sending:  '${message}'`);
-    echoCharacteristic.write(message);
-  }, 2500);
-}
-
-process.on('SIGINT', function () {
+// Handle process termination
+const cleanup = async () => {
   console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+  await noble.stopScanningAsync();
+  process.exit();
+};
 
-process.on('SIGQUIT', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+process.on('SIGINT', cleanup);
+process.on('SIGQUIT', cleanup);
+process.on('SIGTERM', cleanup);
 
-process.on('SIGTERM', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+// Start the application
+main().catch(console.error);

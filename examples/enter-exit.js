@@ -9,7 +9,7 @@
 */
 const noble = require('../index');
 
-const RSSI_THRESHOLD = -90;
+const RSSI_THRESHOLD = -50;
 const EXIT_GRACE_PERIOD = 2000; // milliseconds
 
 const inRange = [];
