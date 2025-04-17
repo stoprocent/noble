@@ -27,9 +27,9 @@ async function main() {
   }
 }
 
-noble.on('discover', (peripheral) => {
+noble.on('discover', async (peripheral) => {
   // connect to the first peripheral that is scanned
-  noble.stopScanningAsync();
+  await noble.stopScanningAsync();
   const name = peripheral.advertisement.localName;
   console.log(`Connecting to '${name}' ${peripheral.id}`);
   connectAndSetUp(peripheral);
