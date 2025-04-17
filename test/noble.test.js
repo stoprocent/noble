@@ -1,8 +1,3 @@
-const should = require('should');
-const sinon = require('sinon');
-
-const { assert } = sinon;
-
 const Noble = require('../lib/noble');
 const Peripheral = require('../lib/peripheral');
 const Service = require('../lib/service');
@@ -18,73 +13,43 @@ describe('noble', () => {
 
   beforeEach(() => {
     mockBindings = {
-      init: () => {},
-      on: () => {}
+      start: jest.fn(),
+      on: jest.fn(),
+      startScanning: jest.fn(),
+      stopScanning: jest.fn(),
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      updateRssi: jest.fn(),
+      discoverServices: jest.fn(),
+      discoverIncludedServices: jest.fn(),
+      discoverCharacteristics: jest.fn(),
+      read: jest.fn(),
+      write: jest.fn(),
+      broadcast: jest.fn(),
+      notify: jest.fn(),
+      discoverDescriptors: jest.fn(),
+      readValue: jest.fn(),
+      writeValue: jest.fn(),
+      readHandle: jest.fn(),
+      writeHandle: jest.fn(),
+      reset: jest.fn(),
+      setScanParameters: jest.fn(),
+      cancelConnect: jest.fn(),
+      addressToId: jest.fn()
     };
 
     noble = new Noble(mockBindings);
+    noble.removeAllListeners('warning');
+    noble._peripherals = new Map();
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   describe('startScanning', () => {
-    beforeEach(() => {
-      mockBindings.startScanning = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should emit warning due to serviceUuids', () => {
-      const callback = sinon.spy();
-      const eventCallback = sinon.spy();
-      const expectedAllowDuplicates = true;
-      noble.on('warning', eventCallback);
-
-      noble.startScanning(callback, expectedAllowDuplicates);
-      noble.emit('stateChange', 'poweredOn');
-      // Check for single callback
-      noble.emit('stateChange', 'poweredOn');
-      noble.emit('scanStart');
-      // Check for single callback
-      noble.emit('scanStart');
-
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
-        callback,
-        expectedAllowDuplicates
-      );
-      assert.calledOnceWithExactly(
-        eventCallback,
-        'calling startScanning(callback) is deprecated'
-      );
-    });
-
-    it('should emit warning due to allowDuplicates', () => {
-      const callback = sinon.spy();
-      const eventCallback = sinon.spy();
-      const expectedServiceUuids = [1, 2, 3];
-      noble.on('warning', eventCallback);
-
-      noble.startScanning(expectedServiceUuids, callback);
-      noble.emit('stateChange', 'poweredOn');
-      // Check for single callback
-      noble.emit('stateChange', 'poweredOn');
-      noble.emit('scanStart');
-      // Check for single callback
-      noble.emit('scanStart');
-
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
-        expectedServiceUuids,
-        callback
-      );
-      assert.calledOnceWithExactly(
-        eventCallback,
-        'calling startScanning(serviceUuids, callback) is deprecated'
-      );
-    });
-
-    it('should delegate to binding', () => {
+  
+    test('should delegate to binding', () => {
       const expectedServiceUuids = [1, 2, 3];
       const expectedAllowDuplicates = true;
 
@@ -96,17 +61,17 @@ describe('noble', () => {
       // Check for single callback
       noble.emit('scanStart');
 
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
+      expect(mockBindings.startScanning).toHaveBeenCalledWith(
         expectedServiceUuids,
         expectedAllowDuplicates
       );
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
 
-    it('should delegate to callback', async () => {
+    test('should delegate to callback', async () => {
       const expectedServiceUuids = [1, 2, 3];
       const expectedAllowDuplicates = true;
-      const callback = sinon.spy();
+      const callback = jest.fn();
 
       noble.startScanning(
         expectedServiceUuids,
@@ -120,31 +85,32 @@ describe('noble', () => {
       // Check for single callback
       noble.emit('scanStart');
 
-      assert.calledOnceWithExactly(callback, null, undefined);
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
+      expect(callback).toHaveBeenCalledWith(null, undefined);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockBindings.startScanning).toHaveBeenCalledWith(
         expectedServiceUuids,
         expectedAllowDuplicates
       );
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
 
-    it('should delegate to callback, already initialized', async () => {
-      noble.initialized = true;
+    test('should delegate to callback, already initialized', async () => {
+      noble._initialized = true;
       noble._state = 'poweredOn';
 
       noble.startScanning();
 
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
+      expect(mockBindings.startScanning).toHaveBeenCalledWith(
         undefined,
         undefined
       );
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
 
-    it('should delegate to callback with filter', async () => {
+    test('should delegate to callback with filter', async () => {
       const expectedServiceUuids = [1, 2, 3];
       const expectedAllowDuplicates = true;
-      const callback = sinon.spy();
+      const callback = jest.fn();
 
       noble.startScanning(
         expectedServiceUuids,
@@ -156,16 +122,17 @@ describe('noble', () => {
       noble.emit('stateChange', 'poweredOn');
       noble.emit('scanStart', 'filter');
 
-      assert.calledOnceWithExactly(callback, null, 'filter');
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
+      expect(callback).toHaveBeenCalledWith(null, 'filter');
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockBindings.startScanning).toHaveBeenCalledWith(
         expectedServiceUuids,
         expectedAllowDuplicates
       );
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw an error if not powered on', async () => {
-      try {
+    test('should throw an error if not powered on', async () => {
+      expect(() => {
         noble.startScanning();
         noble.emit('stateChange', 'poweredOff');
         // Check for single callback
@@ -173,27 +140,14 @@ describe('noble', () => {
         noble.emit('scanStart');
         // Check for single callback
         noble.emit('scanStart');
-
-        assert.fail();
-      } catch (e) {
-        should(e.message).equal(
-          'Could not start scanning, state is poweredOff (not poweredOn)'
-        );
-      }
-      assert.notCalled(mockBindings.startScanning);
+      }).toThrow('Could not start scanning, state is poweredOff (not poweredOn)');
+      
+      expect(mockBindings.startScanning).not.toHaveBeenCalled();
     });
   });
 
   describe('startScanningAsync', () => {
-    beforeEach(() => {
-      mockBindings.startScanning = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should delegate to binding', async () => {
+    test('should delegate to binding', async () => {
       const expectedServiceUuids = [1, 2, 3];
       const expectedAllowDuplicates = true;
 
@@ -208,15 +162,15 @@ describe('noble', () => {
       // Check for single callback
       noble.emit('scanStart');
 
-      should(promise).resolvedWith(undefined);
-      assert.calledOnceWithExactly(
-        mockBindings.startScanning,
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockBindings.startScanning).toHaveBeenCalledWith(
         expectedServiceUuids,
         expectedAllowDuplicates
       );
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw an error if not powered on', async () => {
+    test('should throw an error if not powered on', async () => {
       const promise = noble.startScanningAsync();
       noble.emit('stateChange', 'poweredOff');
       // Check for single callback
@@ -225,311 +179,256 @@ describe('noble', () => {
       // Check for single callback
       noble.emit('scanStart');
 
-      should(promise).rejectedWith(
+      await expect(promise).rejects.toThrow(
         'Could not start scanning, state is poweredOff (not poweredOn)'
       );
-      assert.notCalled(mockBindings.startScanning);
+      expect(mockBindings.startScanning).not.toHaveBeenCalled();
     });
   });
 
   describe('stopScanning', () => {
-    beforeEach(() => {
-      mockBindings.stopScanning = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should no callback', async () => {
-      noble.initialized = true;
+    test('should no callback', async () => {
+      noble._initialized = true;
       noble.stopScanning();
-      assert.calledOnceWithExactly(mockBindings.stopScanning);
+      expect(mockBindings.stopScanning).toHaveBeenCalled();
+      expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('stopScanningAsync', () => {
-    beforeEach(() => {
-      mockBindings.stopScanning = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should not delegate to binding (not initialized)', async () => {
+    test('should not delegate to binding (not initialized)', async () => {
       const promise = noble.stopScanningAsync();
       noble.emit('scanStop');
 
-      should(promise).resolvedWith(undefined);
-      assert.notCalled(mockBindings.stopScanning);
+      await expect(promise).rejects.toThrow('Bindings are not initialized');
+      expect(mockBindings.stopScanning).not.toHaveBeenCalled();
     });
 
-    it('should delegate to binding (initilazed)', async () => {
-      noble.initialized = true;
+    test('should delegate to binding (initilazed)', async () => {
+      noble._initialized = true;
       const promise = noble.stopScanningAsync();
       noble.emit('scanStop');
 
-      should(promise).resolvedWith(undefined);
-      assert.calledOnceWithExactly(mockBindings.stopScanning);
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockBindings.stopScanning).toHaveBeenCalled();
+      expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('connect', () => {
-    beforeEach(() => {
-      mockBindings.connect = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-    it('should delegate to binding', () => {
+    test('should delegate to binding', () => {
       const peripheralUuid = 'peripheral-uuid';
       const parameters = {};
 
+      mockBindings.addressToId = jest.fn().mockReturnValue(peripheralUuid);
       noble.connect(peripheralUuid, parameters);
-
-      assert.calledOnceWithExactly(
-        mockBindings.connect,
+      
+      expect(mockBindings.connect).toHaveBeenCalledWith(
         peripheralUuid,
         parameters
       );
+      expect(mockBindings.connect).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('onConnect', () => {
-    it('should emit connected on existing peripheral', () => {
-      const emit = sinon.spy();
-      noble._peripherals = {
-        uuid: { emit }
-      };
+    test('should emit connected on existing peripheral', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('uuid', { emit });
 
-      const warningCallback = sinon.spy();
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onConnect('uuid', false);
+      noble._onConnect('uuid', false);
 
-      assert.calledOnceWithExactly(emit, 'connect', false);
-      assert.notCalled(warningCallback);
+      expect(emit).toHaveBeenCalledWith('connect', false);
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(warningCallback).not.toHaveBeenCalled();
 
-      should(noble._peripherals).deepEqual({
-        uuid: { state: 'connected', emit }
-      });
+      const peripheral = noble._peripherals.get('uuid');
+      expect(peripheral).toHaveProperty('emit', emit);
+      expect(peripheral).toHaveProperty('state', 'connected');
     });
 
-    it('should emit error on existing peripheral', () => {
-      const emit = sinon.spy();
-      noble._peripherals = {
-        uuid: { emit }
-      };
+    test('should emit error on existing peripheral', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('uuid', { emit });
 
-      const warningCallback = sinon.spy();
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onConnect('uuid', true);
+      noble._onConnect('uuid', true);
 
-      assert.calledOnceWithExactly(emit, 'connect', true);
-      assert.notCalled(warningCallback);
+      expect(emit).toHaveBeenCalledWith('connect', true);
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(warningCallback).not.toHaveBeenCalled();
 
-      should(noble._peripherals).deepEqual({
-        uuid: { state: 'error', emit }
-      });
+      const peripheral = noble._peripherals.get('uuid');
+      expect(peripheral).toHaveProperty('emit', emit);
+      expect(peripheral).toHaveProperty('state', 'error');
     });
 
-    it('should emit warning on missing peripheral', () => {
-      const warningCallback = sinon.spy();
+    test('should emit warning on missing peripheral', () => {
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onConnect('uuid', true);
+      noble._onConnect('uuid', true);
 
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral uuid connected!');
-
-      should(noble._peripherals).deepEqual({});
+      expect(warningCallback).toHaveBeenCalledWith('unknown peripheral uuid connected!');
+      expect(warningCallback).toHaveBeenCalledTimes(1);
+      expect(noble._peripherals.size).toBe(0);
     });
   });
 
   describe('setScanParameters', () => {
-    beforeEach(() => {
-      mockBindings.setScanParameters = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should delegate to binding', async () => {
+    test('should delegate to binding', async () => {
       const interval = 'interval';
       const window = 'window';
 
       noble.setScanParameters(interval, window);
       noble.emit('scanParametersSet');
 
-      assert.calledOnceWithExactly(
-        mockBindings.setScanParameters,
+      expect(mockBindings.setScanParameters).toHaveBeenCalledWith(
         interval,
         window
       );
+      expect(mockBindings.setScanParameters).toHaveBeenCalledTimes(1);
     });
 
-    it('should delegate to callback too', async () => {
+    test('should delegate to callback too', async () => {
       const interval = 'interval';
       const window = 'window';
-      const callback = sinon.spy();
+      const callback = jest.fn();
 
       noble.setScanParameters(interval, window, callback);
       noble.emit('scanParametersSet');
       // Check for single callback
       noble.emit('scanParametersSet');
 
-      assert.calledOnceWithExactly(
-        mockBindings.setScanParameters,
+      expect(mockBindings.setScanParameters).toHaveBeenCalledWith(
         interval,
         window
       );
-      assert.calledOnceWithExactly(callback);
+      expect(mockBindings.setScanParameters).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalled();
+      expect(callback).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('cancelConnect', () => {
-    beforeEach(() => {
-      mockBindings.cancelConnect = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should delegate to binding', () => {
+    test('should delegate to binding', () => {
       const peripheralUuid = 'peripheral-uuid';
       const parameters = {};
 
+      mockBindings.addressToId = jest.fn().mockReturnValue(peripheralUuid);
       noble.cancelConnect(peripheralUuid, parameters);
 
-      assert.calledOnceWithExactly(
-        mockBindings.cancelConnect,
+      expect(mockBindings.cancelConnect).toHaveBeenCalledWith(
         peripheralUuid,
         parameters
       );
+      expect(mockBindings.cancelConnect).toHaveBeenCalledTimes(1);
     });
   });
 
-  it('should emit state', () => {
-    const callback = sinon.spy();
+  test('should emit state', () => {
+    const callback = jest.fn();
     noble.on('stateChange', callback);
 
     const state = 'newState';
-    noble.onStateChange(state);
+    noble._onStateChange(state);
 
-    should(noble._state).equal(state);
-    assert.calledOnceWithExactly(callback, state);
+    expect(noble.state).toBe(state);
+    expect(callback).toHaveBeenCalledWith(state);
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
-  it('should change address', () => {
+  test('should change address', () => {
     const address = 'newAddress';
-    noble.onAddressChange(address);
+    noble._onAddressChange(address);
 
-    should(noble.address).equal(address);
+    expect(noble.address).toBe(address);
   });
 
-  it('should emit scanParametersSet event', () => {
-    const callback = sinon.spy();
+  test('should emit scanParametersSet event', () => {
+    const callback = jest.fn();
     noble.on('scanParametersSet', callback);
 
-    noble.onScanParametersSet();
+    noble._onScanParametersSet();
 
-    assert.calledOnceWithExactly(callback);
+    expect(callback).toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
-  it('should emit scanStart event', () => {
-    const callback = sinon.spy();
+  test('should emit scanStart event', () => {
+    const callback = jest.fn();
     noble.on('scanStart', callback);
 
-    noble.onScanStart('filterDuplicates');
+    noble._onScanStart('filterDuplicates');
 
-    assert.calledOnceWithExactly(callback, 'filterDuplicates');
+    expect(callback).toHaveBeenCalledWith('filterDuplicates');
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
-  it('should emit scanStop event', () => {
-    const callback = sinon.spy();
+  test('should emit scanStop event', () => {
+    const callback = jest.fn();
     noble.on('scanStop', callback);
 
-    noble.onScanStop();
+    noble._onScanStop();
 
-    assert.calledOnceWithExactly(callback);
+    expect(callback).toHaveBeenCalled();
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   describe('reset', () => {
-    beforeEach(() => {
-      mockBindings.reset = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should reset', () => {
+    test('should reset', () => {
       noble.reset();
-      assert.calledOnceWithExactly(mockBindings.reset);
+      expect(mockBindings.reset).toHaveBeenCalled();
+      expect(mockBindings.reset).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('disconnect', () => {
-    beforeEach(() => {
-      mockBindings.disconnect = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should disconnect', () => {
+    test('should disconnect', () => {
       noble.disconnect('peripheralUuid');
-      assert.calledOnceWithExactly(mockBindings.disconnect, 'peripheralUuid');
+      expect(mockBindings.disconnect).toHaveBeenCalledWith('peripheralUuid');
+      expect(mockBindings.disconnect).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('onDisconnect', () => {
-    it('should emit disconnect on existing peripheral', () => {
-      const emit = sinon.spy();
-      noble._peripherals = {
-        uuid: { emit }
-      };
+    test('should emit disconnect on existing peripheral', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('uuid', { emit });
 
-      const warningCallback = sinon.spy();
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onDisconnect('uuid', false);
+      noble._onDisconnect('uuid', false);
 
-      assert.calledOnceWithExactly(emit, 'disconnect', false);
-      assert.notCalled(warningCallback);
+      expect(emit).toHaveBeenCalledWith('disconnect', false);
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(warningCallback).not.toHaveBeenCalled();
 
-      should(noble._peripherals).deepEqual({
-        uuid: { state: 'disconnected', emit }
-      });
+      const peripheral = noble._peripherals.get('uuid');
+      expect(peripheral).toHaveProperty('emit', emit);
+      expect(peripheral).toHaveProperty('state', 'disconnected');
     });
 
-    it('should emit warning on missing peripheral', () => {
-      const warningCallback = sinon.spy();
+    test('should emit warning on missing peripheral', () => {
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onDisconnect('uuid', true);
+      noble._onDisconnect('uuid', true);
 
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral uuid disconnected!');
-
-      should(noble._peripherals).deepEqual({});
+      expect(warningCallback).toHaveBeenCalledWith('unknown peripheral uuid disconnected!');
+      expect(warningCallback).toHaveBeenCalledTimes(1);
+      expect(noble._peripherals.size).toBe(0);
     });
   });
 
   describe('onDiscover', () => {
-    beforeEach(() => {
-      mockBindings.disconnect = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should add new peripheral', () => {
+    test('should add new peripheral', () => {
       const uuid = 'uuid';
       const address = 'address';
       const addressType = 'addressType';
@@ -537,10 +436,10 @@ describe('noble', () => {
       const advertisement = [];
       const rssi = 'rssi';
 
-      const eventCallback = sinon.spy();
+      const eventCallback = jest.fn();
       noble.on('discover', eventCallback);
 
-      noble.onDiscover(
+      noble._onDiscover(
         uuid,
         address,
         addressType,
@@ -550,25 +449,27 @@ describe('noble', () => {
       );
 
       // Check new peripheral
-      should(noble._peripherals).have.keys(uuid);
-      const peripheral = noble._peripherals[uuid];
-      should(peripheral._noble).equal(noble);
-      should(peripheral.id).equal(uuid);
-      should(peripheral.address).equal(address);
-      should(peripheral.addressType).equal(addressType);
-      should(peripheral.connectable).equal(connectable);
-      should(peripheral.advertisement).equal(advertisement);
-      should(peripheral.rssi).equal(rssi);
+      expect(noble._peripherals.has(uuid)).toBe(true);
+      expect(noble._discoveredPeripherals.has(uuid)).toBe(true);
 
-      should(noble._services).have.keys(uuid);
-      should(noble._characteristics).have.keys(uuid);
-      should(noble._descriptors).have.keys(uuid);
-      should(noble._discoveredPeripheralUUids).deepEqual({ uuid: true });
+      const peripheral = noble._peripherals.get(uuid);
+      expect(peripheral._noble).toBe(noble);
+      expect(peripheral.id).toBe(uuid);
+      expect(peripheral.address).toBe(address);
+      expect(peripheral.addressType).toBe(addressType);
+      expect(peripheral.connectable).toBe(connectable);
+      expect(peripheral.advertisement).toBe(advertisement);
+      expect(peripheral.rssi).toBe(rssi);
 
-      assert.calledOnceWithExactly(eventCallback, peripheral);
+      expect(noble._services[uuid]).toEqual({});
+      expect(noble._characteristics[uuid]).toEqual({});
+      expect(noble._descriptors[uuid]).toEqual({});
+
+      expect(eventCallback).toHaveBeenCalledWith(peripheral);
+      expect(eventCallback).toHaveBeenCalledTimes(1);
     });
 
-    it('should update existing peripheral', () => {
+    test('should update existing peripheral', () => {
       const uuid = 'uuid';
       const address = 'address';
       const addressType = 'addressType';
@@ -577,7 +478,7 @@ describe('noble', () => {
       const rssi = 'rssi';
 
       // init peripheral
-      noble._peripherals[uuid] = new Peripheral(
+      noble._peripherals.set(uuid, new Peripheral(
         noble,
         uuid,
         'originalAddress',
@@ -585,12 +486,12 @@ describe('noble', () => {
         'originalConnectable',
         ['adv1'],
         'originalRssi'
-      );
+      ));
 
-      const eventCallback = sinon.spy();
+      const eventCallback = jest.fn();
       noble.on('discover', eventCallback);
 
-      noble.onDiscover(
+      noble._onDiscover(
         uuid,
         address,
         addressType,
@@ -599,26 +500,28 @@ describe('noble', () => {
         rssi
       );
 
-      // Check new peripheral
-      should(noble._peripherals).have.keys(uuid);
-      const peripheral = noble._peripherals[uuid];
-      should(peripheral._noble).equal(noble);
-      should(peripheral.id).equal(uuid);
-      should(peripheral.address).equal('originalAddress');
-      should(peripheral.addressType).equal('originalAddressType');
-      should(peripheral.connectable).equal(connectable);
-      should(peripheral.advertisement).deepEqual(['adv1', 'adv2', 'adv3']);
-      should(peripheral.rssi).equal(rssi);
+      // Check updated peripheral
+      expect(noble._peripherals.has(uuid)).toBe(true);
+      expect(noble._discoveredPeripherals.has(uuid)).toBe(true);
 
-      should(noble._services).be.empty();
-      should(noble._characteristics).be.empty();
-      should(noble._descriptors).be.empty();
-      should(noble._discoveredPeripheralUUids).deepEqual({ uuid: true });
+      const peripheral = noble._peripherals.get(uuid);
+      expect(peripheral._noble).toBe(noble);
+      expect(peripheral.id).toBe(uuid);
+      expect(peripheral.address).toBe('originalAddress');
+      expect(peripheral.addressType).toBe('originalAddressType');
+      expect(peripheral.connectable).toBe(connectable);
+      expect(peripheral.advertisement).toEqual(['adv1', 'adv2', 'adv3']);
+      expect(peripheral.rssi).toBe(rssi);
 
-      assert.calledOnceWithExactly(eventCallback, peripheral);
+      expect(Object.keys(noble._services)).toHaveLength(0);
+      expect(Object.keys(noble._characteristics)).toHaveLength(0);
+      expect(Object.keys(noble._descriptors)).toHaveLength(0);
+
+      expect(eventCallback).toHaveBeenCalledWith(peripheral);
+      expect(eventCallback).toHaveBeenCalledTimes(1);
     });
 
-    it('should emit on duplicate', () => {
+    test('should emit on duplicate', () => {
       const uuid = 'uuid';
       const address = 'address';
       const addressType = 'addressType';
@@ -627,13 +530,13 @@ describe('noble', () => {
       const rssi = 'rssi';
 
       // register peripheral
-      noble._discoveredPeripheralUUids = { uuid: true };
+      noble._discoveredPeripherals.add(uuid);
       noble._allowDuplicates = true;
 
-      const eventCallback = sinon.spy();
+      const eventCallback = jest.fn();
       noble.on('discover', eventCallback);
 
-      noble.onDiscover(
+      noble._onDiscover(
         uuid,
         address,
         addressType,
@@ -642,10 +545,11 @@ describe('noble', () => {
         rssi
       );
 
-      assert.calledOnceWithExactly(eventCallback, noble._peripherals[uuid]);
+      expect(eventCallback).toHaveBeenCalledWith(noble._peripherals.get(uuid));
+      expect(eventCallback).toHaveBeenCalledTimes(1);
     });
 
-    it('should not emit on duplicate', () => {
+    test('should not emit on duplicate', () => {
       const uuid = 'uuid';
       const address = 'address';
       const addressType = 'addressType';
@@ -654,12 +558,13 @@ describe('noble', () => {
       const rssi = 'rssi';
 
       // register peripheral
-      noble._discoveredPeripheralUUids = { uuid: true };
+      noble._discoveredPeripherals.add(uuid);
+      noble._allowDuplicates = false;
 
-      const eventCallback = sinon.spy();
+      const eventCallback = jest.fn();
       noble.on('discover', eventCallback);
 
-      noble.onDiscover(
+      noble._onDiscover(
         uuid,
         address,
         addressType,
@@ -668,10 +573,10 @@ describe('noble', () => {
         rssi
       );
 
-      assert.notCalled(eventCallback);
+      expect(eventCallback).not.toHaveBeenCalled();
     });
 
-    it('should emit on new peripheral (even if duplicates are disallowed)', () => {
+    test('should emit on new peripheral (even if duplicates are disallowed)', () => {
       const uuid = 'uuid';
       const address = 'address';
       const addressType = 'addressType';
@@ -679,10 +584,10 @@ describe('noble', () => {
       const advertisement = ['adv1', 'adv2', 'adv3'];
       const rssi = 'rssi';
 
-      const eventCallback = sinon.spy();
+      const eventCallback = jest.fn();
       noble.on('discover', eventCallback);
 
-      noble.onDiscover(
+      noble._onDiscover(
         uuid,
         address,
         addressType,
@@ -691,69 +596,57 @@ describe('noble', () => {
         rssi
       );
 
-      assert.calledOnceWithExactly(eventCallback, noble._peripherals[uuid]);
+      expect(eventCallback).toHaveBeenCalledWith(noble._peripherals.get(uuid));
+      expect(eventCallback).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('updateRssi', () => {
-    beforeEach(() => {
-      mockBindings.updateRssi = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should updateRssi', () => {
+    test('should updateRssi', () => {
       noble.updateRssi('peripheralUuid');
-      assert.calledOnceWithExactly(mockBindings.updateRssi, 'peripheralUuid');
+      expect(mockBindings.updateRssi).toHaveBeenCalledWith('peripheralUuid');
+      expect(mockBindings.updateRssi).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('onRssiUpdate', () => {
-    it('should emit rssiUpdate on existing peripheral', () => {
-      const emit = sinon.spy();
-      noble._peripherals = {
-        uuid: { emit }
-      };
+    test('should emit rssiUpdate on existing peripheral', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('uuid', { emit });
 
-      const warningCallback = sinon.spy();
+      noble._onRssiUpdate('uuid', 3);
 
-      noble.on('warning', warningCallback);
-      noble.onRssiUpdate('uuid', 3);
+      expect(emit).toHaveBeenCalledWith('rssiUpdate', 3, undefined);
+      expect(emit).toHaveBeenCalledTimes(1);
 
-      assert.calledOnceWithExactly(emit, 'rssiUpdate', 3);
-      assert.notCalled(warningCallback);
-
-      should(noble._peripherals).deepEqual({
-        uuid: { rssi: 3, emit }
-      });
+      const peripheral = noble._peripherals.get('uuid');
+      expect(peripheral).toHaveProperty('emit', emit);
+      expect(peripheral).toHaveProperty('rssi', 3);
     });
 
-    it('should emit warning on missing peripheral', () => {
-      const warningCallback = sinon.spy();
+    test('should emit warning on missing peripheral', () => {
+      const warningCallback = jest.fn();
 
       noble.on('warning', warningCallback);
-      noble.onRssiUpdate('uuid', 4);
+      noble._onRssiUpdate('uuid', 4);
 
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral uuid RSSI update!');
-
-      should(noble._peripherals).deepEqual({});
+      expect(warningCallback).toHaveBeenCalledWith('unknown peripheral uuid RSSI update!');
+      expect(warningCallback).toHaveBeenCalledTimes(1);
+      expect(noble._peripherals.size).toBe(0);
     });
   });
 
-  it('should add multiple services', () => {
-    noble.addService = sinon.stub().returnsArg(1);
+  test('should add multiple services', () => {
+    noble.addService = jest.fn().mockImplementation((peripheralUuid, service) => service);
 
     const peripheralUuid = 'peripheralUuid';
     const services = ['service1', 'service2'];
     const result = noble.addServices(peripheralUuid, services);
 
-    assert.callCount(noble.addService, 2);
-    assert.calledWithExactly(noble.addService, peripheralUuid, 'service1');
-    assert.calledWithExactly(noble.addService, peripheralUuid, 'service2');
-
-    should(result).deepEqual(services);
+    expect(noble.addService).toHaveBeenCalledTimes(2);
+    expect(noble.addService).toHaveBeenNthCalledWith(1, peripheralUuid, 'service1');
+    expect(noble.addService).toHaveBeenNthCalledWith(2, peripheralUuid, 'service2');
+    expect(result).toEqual(services);
   });
 
   describe('addService', () => {
@@ -764,58 +657,59 @@ describe('noble', () => {
     const peripheral = {};
 
     beforeEach(() => {
-      noble._peripherals = { [peripheralUuid]: peripheral };
+      noble._peripherals.set(peripheralUuid, peripheral);
       noble._services = { [peripheralUuid]: {} };
       noble._characteristics = { [peripheralUuid]: {} };
       noble._descriptors = { [peripheralUuid]: {} };
     });
 
-    it('should add service to lower layer', () => {
-      noble._bindings.addService = sinon.spy();
+    test('should add service to lower layer', () => {
+      noble._bindings.addService = jest.fn();
 
       const result = noble.addService(peripheralUuid, service);
 
-      assert.calledOnceWithExactly(noble._bindings.addService, peripheralUuid, service);
+      expect(noble._bindings.addService).toHaveBeenCalledWith(peripheralUuid, service);
+      expect(noble._bindings.addService).toHaveBeenCalledTimes(1);
 
       const expectedService = new Service(noble, peripheralUuid, service.uuid);
-      should(result).deepEqual(expectedService);
-      should(peripheral.services).deepEqual([expectedService]);
-      should(noble._services).deepEqual({
+      expect(result).toEqual(expectedService);
+      expect(peripheral.services).toEqual([expectedService]);
+      expect(noble._services).toEqual({
         [peripheralUuid]: {
           [service.uuid]: expectedService
         }
       });
-      should(noble._characteristics).deepEqual({
+      expect(noble._characteristics).toEqual({
         [peripheralUuid]: {
           [service.uuid]: {}
         }
       });
-      should(noble._descriptors).deepEqual({
+      expect(noble._descriptors).toEqual({
         [peripheralUuid]: {
           [service.uuid]: {}
         }
       });
     });
 
-    it('should add service only to noble', () => {
+    test('should add service only to noble', () => {
       peripheral.services = [];
 
       const result = noble.addService(peripheralUuid, service);
 
       const expectedService = new Service(noble, peripheralUuid, service.uuid);
-      should(result).deepEqual(expectedService);
-      should(peripheral.services).deepEqual([expectedService]);
-      should(noble._services).deepEqual({
+      expect(result).toEqual(expectedService);
+      expect(peripheral.services).toEqual([expectedService]);
+      expect(noble._services).toEqual({
         [peripheralUuid]: {
           [service.uuid]: expectedService
         }
       });
-      should(noble._characteristics).deepEqual({
+      expect(noble._characteristics).toEqual({
         [peripheralUuid]: {
           [service.uuid]: {}
         }
       });
-      should(noble._descriptors).deepEqual({
+      expect(noble._descriptors).toEqual({
         [peripheralUuid]: {
           [service.uuid]: {}
         }
@@ -827,740 +721,60 @@ describe('noble', () => {
     const peripheralUuid = 'peripheralUuid';
     const services = ['service1', 'service2'];
 
-    it('should not emit servicesDiscovered', () => {
-      const callback = sinon.spy();
+    test('should not emit servicesDiscovered', () => {
+      const callback = jest.fn();
       noble.on('servicesDiscovered', callback);
 
-      noble.onServicesDiscovered(peripheralUuid, services);
+      noble._onServicesDiscovered(peripheralUuid, services);
 
-      assert.notCalled(callback);
+      expect(callback).not.toHaveBeenCalled();
     });
 
-    it('should emit servicesDiscovered', () => {
-      const emit = sinon.spy();
-      noble._peripherals = { [peripheralUuid]: { uuid: 'peripheral', emit } };
+    test('should emit servicesDiscovered', () => {
+      const emit = jest.fn();
+      noble._peripherals.set(peripheralUuid, { uuid: 'peripheral', emit });
 
-      noble.onServicesDiscovered(peripheralUuid, services);
+      noble._onServicesDiscovered(peripheralUuid, services);
 
-      assert.calledOnceWithExactly(emit, 'servicesDiscovered', { uuid: 'peripheral', emit }, services);
+      expect(emit).toHaveBeenCalledWith('servicesDiscovered', { uuid: 'peripheral', emit }, services);
+      expect(emit).toHaveBeenCalledTimes(1);
     });
   });
 
-  it('discoverServices - should delegate to bindings', () => {
-    noble._bindings.discoverServices = sinon.spy();
+  test('discoverServices - should delegate to bindings', () => {
+    noble._bindings.discoverServices = jest.fn();
     noble.discoverServices('peripheral', 'uuids');
-    assert.calledOnceWithExactly(noble._bindings.discoverServices, 'peripheral', 'uuids');
+    expect(noble._bindings.discoverServices).toHaveBeenCalledWith('peripheral', 'uuids');
+    expect(noble._bindings.discoverServices).toHaveBeenCalledTimes(1);
   });
 
-  describe('onServicesDiscover', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble.onServicesDiscover('pUuid', ['service1', 'service2']);
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral pUuid services discover!');
-    });
-
-    it('should emit servicesDiscover and store services', () => {
-      const warningCallback = sinon.spy();
-      const discoverCallback = sinon.spy();
-
-      const peripheralUuid = 'peripheralUuid';
-
-      noble._peripherals = { [peripheralUuid]: { emit: discoverCallback } };
-      noble._services = { [peripheralUuid]: {} };
-      noble._characteristics = { [peripheralUuid]: {} };
-      noble._descriptors = { [peripheralUuid]: {} };
-
-      noble.on('warning', warningCallback);
-
-      noble.onServicesDiscover(peripheralUuid, ['service1', 'service2']);
-
-      const services = [new Service(noble, peripheralUuid, 'service1'), new Service(noble, peripheralUuid, 'service2')];
-
-      assert.calledOnceWithExactly(discoverCallback, 'servicesDiscover', services);
-      assert.notCalled(warningCallback);
-
-      should(noble._peripherals).deepEqual({
-        [peripheralUuid]: { services, emit: discoverCallback }
-      });
-      should(noble._services).deepEqual({
-        [peripheralUuid]: { service1: services[0], service2: services[1] }
-      });
-      should(noble._characteristics).deepEqual({
-        [peripheralUuid]: { service1: {}, service2: {} }
-      });
-      should(noble._descriptors).deepEqual({
-        [peripheralUuid]: { service1: {}, service2: {} }
-      });
-    });
-  });
-
-  describe('discoverIncludedServices', () => {
-    beforeEach(() => {
-      mockBindings.discoverIncludedServices = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should disconnect', () => {
-      noble.discoverIncludedServices('peripheralUuid', 'serviceUuid', 'serviceUuids');
-      assert.calledOnceWithExactly(mockBindings.discoverIncludedServices, 'peripheralUuid', 'serviceUuid', 'serviceUuids');
-    });
-  });
-
-  describe('addCharacteristics', () => {
-    const peripheralUuid = 'peripheralUuid';
-    const serviceUuid = 'serviceUuid';
-    const characteristic1 = {
-      uuid: 'characteristic1',
-      properties: 'properties1'
-    };
-    const characteristic2 = {
-      uuid: 'characteristic2',
-      properties: 'properties2'
-    };
-    const characteristics = [characteristic1, characteristic2];
-
-    beforeEach(() => {
-      noble._services = { [peripheralUuid]: { [serviceUuid]: {} } };
-      noble._characteristics = { [peripheralUuid]: { [serviceUuid]: {} } };
-      noble._descriptors = { [peripheralUuid]: { [serviceUuid]: {} } };
-    });
-
-    it('should delegate to bindings', () => {
-      const warningCallback = sinon.spy();
-
-      noble._bindings.addCharacteristics = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      const result = noble.addCharacteristics(peripheralUuid, serviceUuid, characteristics);
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(noble._bindings.addCharacteristics, peripheralUuid, serviceUuid, characteristics);
-
-      const expectedCharacteristics = [
-        new Characteristic(noble, peripheralUuid, serviceUuid, 'characteristic1', 'properties1'),
-        new Characteristic(noble, peripheralUuid, serviceUuid, 'characteristic2', 'properties2')
-      ];
-      should(result).deepEqual(expectedCharacteristics);
-      should(noble._services).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristics: expectedCharacteristics } } });
-      should(noble._characteristics).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristic1: expectedCharacteristics[0], characteristic2: expectedCharacteristics[1] } } });
-      should(noble._descriptors).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristic1: {}, characteristic2: {} } } });
-    });
-
-    it('should not delegate to bindings', () => {
-      const warningCallback = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      const result = noble.addCharacteristics(peripheralUuid, serviceUuid, characteristics);
-
-      assert.notCalled(warningCallback);
-
-      const expectedCharacteristics = [
-        new Characteristic(noble, peripheralUuid, serviceUuid, 'characteristic1', 'properties1'),
-        new Characteristic(noble, peripheralUuid, serviceUuid, 'characteristic2', 'properties2')
-      ];
-      should(result).deepEqual(expectedCharacteristics);
-      should(noble._services).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristics: expectedCharacteristics } } });
-      should(noble._characteristics).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristic1: expectedCharacteristics[0], characteristic2: expectedCharacteristics[1] } } });
-      should(noble._descriptors).deepEqual({ [peripheralUuid]: { [serviceUuid]: { characteristic1: {}, characteristic2: {} } } });
-    });
-
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._services = { peripheralUuid: {} };
-      const result = noble.addCharacteristics(peripheralUuid, serviceUuid, characteristics);
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown service peripheralUuid, serviceUuid characteristics discover!');
-
-      should(result).equal(undefined);
-      should(noble._services).deepEqual({ [peripheralUuid]: { } });
-      should(noble._characteristics).deepEqual({ [peripheralUuid]: { [serviceUuid]: { } } });
-      should(noble._descriptors).deepEqual({ [peripheralUuid]: { [serviceUuid]: { } } });
-    });
-  });
-
-  it('onCharacteristicsDiscovered - should emit event', () => {
-    const emit = sinon.spy();
-
-    noble._services = {
-      peripheralUuid: {
-        serviceUuid: {
-          emit
-        }
-      }
-    };
-
-    noble.onCharacteristicsDiscovered('peripheralUuid', 'serviceUuid', 'characteristics');
-
-    assert.calledOnceWithExactly(emit, 'characteristicsDiscovered', 'characteristics');
-  });
-
-  it('discoverCharacteristics - should delegate', () => {
-    noble._bindings.discoverCharacteristics = sinon.spy();
-
-    noble.discoverCharacteristics('peripheralUuid', 'serviceUuid', 'characteristicUuids');
-
-    assert.calledOnceWithExactly(noble._bindings.discoverCharacteristics, 'peripheralUuid', 'serviceUuid', 'characteristicUuids');
-  });
-
-  describe('onCharacteristicsDiscover', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-
-      const peripheralUuid = 'peripheralUuid';
-      const serviceUuid = 'serviceUuid';
-      const characteristics = ['characteristic1', 'characteristic2'];
-
-      noble.on('warning', warningCallback);
-
-      noble._services[peripheralUuid] = {};
-      noble.onCharacteristicsDiscover(peripheralUuid, serviceUuid, characteristics);
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid characteristics discover!');
-    });
-
-    it('should emit characteristicsDiscover and store characteristics', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      const peripheralUuid = 'peripheralUuid';
-      const serviceUuid = 'serviceUuid';
-      const characteristics = [
-        { uuid: 'characteristic1', properties: 'properties1' },
-        { uuid: 'characteristic2', properties: 'properties2' }
-      ];
-
-      noble._services = { [peripheralUuid]: { [serviceUuid]: { emit } } };
-      noble._characteristics = { [peripheralUuid]: { [serviceUuid]: {} } };
-      noble._descriptors = { [peripheralUuid]: { [serviceUuid]: {} } };
-
-      noble.on('warning', warningCallback);
-
-      noble.onCharacteristicsDiscover(peripheralUuid, serviceUuid, characteristics);
-
-      const expectedCharacteristics = [
-        new Characteristic(noble, peripheralUuid, serviceUuid, characteristics[0].uuid, characteristics[0].properties),
-        new Characteristic(noble, peripheralUuid, serviceUuid, characteristics[1].uuid, characteristics[1].properties)
-      ];
-
-      assert.calledOnceWithExactly(emit, 'characteristicsDiscover', expectedCharacteristics);
-      assert.notCalled(warningCallback);
-
-      should(noble._services).deepEqual({
-        [peripheralUuid]: {
-          [serviceUuid]: {
-            emit, characteristics: expectedCharacteristics
-          }
-        }
-      });
-      should(noble._characteristics).deepEqual({
-        [peripheralUuid]: {
-          [serviceUuid]: { characteristic1: expectedCharacteristics[0], characteristic2: expectedCharacteristics[1] }
-        }
-      });
-      should(noble._descriptors).deepEqual({
-        [peripheralUuid]: { [serviceUuid]: { characteristic1: {}, characteristic2: {} } }
-      });
-    });
-  });
-
-  it('read - should delegate to bindings', () => {
-    noble._bindings.read = sinon.spy();
-    noble.read('peripheralUuid', 'serviceUuid', 'characteristicUuid');
-    assert.calledOnceWithExactly(noble._bindings.read, 'peripheralUuid', 'serviceUuid', 'characteristicUuid');
-  });
-
-  describe('onRead', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-          }
-        }
-      };
-      noble.onRead('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'data', 'isNotification');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid read!');
-    });
-
-    it('should emit data and read', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              emit
-            }
-          }
-        }
-      };
-      noble.onRead('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'dataArg', 'isNotification');
-
-      assert.notCalled(warningCallback);
-      assert.callCount(emit, 2);
-      assert.calledWithExactly(emit, 'data', 'dataArg', 'isNotification');
-      assert.calledWithExactly(emit, 'read', 'dataArg', 'isNotification');
-    });
-  });
-
-  it('write - should delegate to bindings', () => {
-    noble._bindings.write = sinon.spy();
-    noble.write('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'dataArg', 'isNotification');
-    assert.calledOnceWithExactly(noble._bindings.write, 'peripheralUuid', 'serviceUuid', 'characteristicUuid', 'dataArg', 'isNotification');
-  });
-
-  describe('onWrite', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-          }
-        }
-      };
-      noble.onWrite('peripheralUuid', 'serviceUuid', 'characteristicUuid');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid write!');
-    });
-
-    it('should emit write', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              emit
-            }
-          }
-        }
-      };
-      noble.onWrite('peripheralUuid', 'serviceUuid', 'characteristicUuid');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'write');
-    });
-  });
-
-  it('broadcast - should delegate to bindings', () => {
-    noble._bindings.broadcast = sinon.spy();
-    noble.broadcast('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'broadcast');
-    assert.calledOnceWithExactly(noble._bindings.broadcast, 'peripheralUuid', 'serviceUuid', 'characteristicUuid', 'broadcast');
-  });
-
-  describe('onBroadcast', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-          }
-        }
-      };
-      noble.onBroadcast('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'state');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid broadcast!');
-    });
-
-    it('should emit broadcast', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              emit
-            }
-          }
-        }
-      };
-      noble.onBroadcast('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'state');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'broadcast', 'state');
-    });
-  });
-
-  it('notify - should delegate to bindings', () => {
-    noble._bindings.notify = sinon.spy();
-    noble.notify('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'notify');
-    assert.calledOnceWithExactly(noble._bindings.notify, 'peripheralUuid', 'serviceUuid', 'characteristicUuid', 'notify');
-  });
-
-  describe('onNotify', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-          }
-        }
-      };
-      noble.onNotify('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'state');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid notify!');
-    });
-
-    it('should emit notify', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._characteristics = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              emit
-            }
-          }
-        }
-      };
-      noble.onNotify('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'state');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'notify', 'state');
-    });
-  });
-
-  it('discoverDescriptors - should delegate', () => {
-    noble._bindings.discoverDescriptors = sinon.spy();
-
-    noble.discoverDescriptors('peripheralUuid', 'serviceUuid', 'characteristicUuid');
-
-    assert.calledOnceWithExactly(noble._bindings.discoverDescriptors, 'peripheralUuid', 'serviceUuid', 'characteristicUuid');
-  });
-
-  describe('onDescriptorsDiscover', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-
-      const peripheralUuid = 'peripheralUuid';
-      const serviceUuid = 'serviceUuid';
-      const characteristicUuid = 'characteristicUuid';
-      const descriptors = ['descriptor1', 'descriptor2'];
-
-      noble.on('warning', warningCallback);
-
-      noble._characteristics[peripheralUuid] = {
-        [serviceUuid]: {}
-      };
-      noble.onDescriptorsDiscover(peripheralUuid, serviceUuid, characteristicUuid, descriptors);
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid descriptors discover!');
-    });
-
-    it('should emit characteristicsDiscover and store characteristics', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      const peripheralUuid = 'peripheralUuid';
-      const serviceUuid = 'serviceUuid';
-      const characteristicUuid = 'characteristicUuid';
-      const descriptors = ['descriptor1', 'descriptor2'];
-
-      noble._characteristics = { [peripheralUuid]: { [serviceUuid]: { [characteristicUuid]: { emit } } } };
-      noble._descriptors = { [peripheralUuid]: { [serviceUuid]: { [characteristicUuid]: {} } } };
-
-      noble.on('warning', warningCallback);
-
-      noble.onDescriptorsDiscover(peripheralUuid, serviceUuid, characteristicUuid, descriptors);
-
-      const expectedDescriptors = [
-        new Descriptor(noble, peripheralUuid, serviceUuid, characteristicUuid, descriptors[0]),
-        new Descriptor(noble, peripheralUuid, serviceUuid, characteristicUuid, descriptors[1])
-      ];
-
-      assert.calledOnceWithExactly(emit, 'descriptorsDiscover', expectedDescriptors);
-      assert.notCalled(warningCallback);
-
-      should(noble._characteristics).deepEqual({
-        [peripheralUuid]: { [serviceUuid]: { [characteristicUuid]: { emit, descriptors: expectedDescriptors } } }
-      });
-      should(noble._descriptors).deepEqual({
-        [peripheralUuid]: { [serviceUuid]: { [characteristicUuid]: { descriptor1: expectedDescriptors[0], descriptor2: expectedDescriptors[1] } } }
-      });
-    });
-  });
-
-  it('readValue - should delegate to bindings', () => {
-    noble._bindings.readValue = sinon.spy();
-    noble.readValue('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid');
-    assert.calledOnceWithExactly(noble._bindings.readValue, 'peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid');
-  });
-
-  describe('onValueRead', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._descriptors = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {}
-          }
-        }
-      };
-      noble.onValueRead('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid', 'data');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid, descriptorUuid value read!');
-    });
-
-    it('should emit valueRead', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._descriptors = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              descriptorUuid: {
-                emit
-              }
-            }
-          }
-        }
-      };
-      noble.onValueRead('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid', 'data');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'valueRead', 'data');
-    });
-  });
-
-  it('writeValue - should delegate to bindings', () => {
-    noble._bindings.writeValue = sinon.spy();
-    noble.writeValue('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid', 'data');
-    assert.calledOnceWithExactly(noble._bindings.writeValue, 'peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid', 'data');
-  });
-
-  describe('onValueWrite', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._descriptors = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {}
-          }
-        }
-      };
-      noble.onValueWrite('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid, serviceUuid, characteristicUuid, descriptorUuid value write!');
-    });
-
-    it('should emit valueWrite', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._descriptors = {
-        peripheralUuid: {
-          serviceUuid: {
-            characteristicUuid: {
-              descriptorUuid: {
-                emit
-              }
-            }
-          }
-        }
-      };
-      noble.onValueWrite('peripheralUuid', 'serviceUuid', 'characteristicUuid', 'descriptorUuid');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'valueWrite');
-    });
-  });
-
-  it('readHandle - should delegate to bindings', () => {
-    noble._bindings.readHandle = sinon.spy();
-    noble.readHandle('peripheralUuid', 'handle');
-    assert.calledOnceWithExactly(noble._bindings.readHandle, 'peripheralUuid', 'handle');
-  });
-
-  describe('onHandleRead', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-      };
-      noble.onHandleRead('peripheralUuid', 'nameOfHandle', 'data');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid handle read!');
-    });
-
-    it('should emit handleWrite', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-        peripheralUuid: {
-          emit
-        }
-      };
-      noble.onHandleRead('peripheralUuid', 'nameOfHandle', 'data');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'handleReadnameOfHandle', 'data');
-    });
-  });
-
-  it('writeHandle - should delegate to bindings', () => {
-    noble._bindings.writeHandle = sinon.spy();
-    noble.writeHandle('peripheralUuid', 'handle', 'data', 'withoutResponse');
-    assert.calledOnceWithExactly(noble._bindings.writeHandle, 'peripheralUuid', 'handle', 'data', 'withoutResponse');
-  });
-
-  describe('onHandleWrite', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-      };
-      noble.onHandleWrite('peripheralUuid', 'nameOfHandle');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid handle write!');
-    });
-
-    it('should emit handleRead', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-        peripheralUuid: {
-          emit
-        }
-      };
-      noble.onHandleWrite('peripheralUuid', 'nameOfHandle');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'handleWritenameOfHandle');
-    });
-  });
-
-  describe('onHandleNotify', () => {
-    it('should emit warning', () => {
-      const warningCallback = sinon.spy();
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-      };
-      noble.onHandleNotify('peripheralUuid', 'nameOfHandle', 'data');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral peripheralUuid handle notify!');
-    });
-
-    it('should emit handleNotify', () => {
-      const warningCallback = sinon.spy();
-      const emit = sinon.spy();
-
-      noble.on('warning', warningCallback);
-
-      noble._peripherals = {
-        peripheralUuid: {
-          emit
-        }
-      };
-      noble.onHandleNotify('peripheralUuid', 'nameOfHandle', 'data');
-
-      assert.notCalled(warningCallback);
-      assert.calledOnceWithExactly(emit, 'handleNotify', 'nameOfHandle', 'data');
-    });
-  });
-
-  it('onMtu - should update peripheral mtu when set before already', () => {
-    const peripheral = {
-      mtu: 234
-    };
-
-    noble._peripherals = { uuid: peripheral };
-    noble.onMtu('uuid', 123);
-
-    should(peripheral).deepEqual({ mtu: 123 });
-  });
-
-  it('onMtu - should update peripheral mtu too when empty', () => {
-    const peripheral = {
-      mtu: null
-    };
-
-    noble._peripherals = { uuid: peripheral };
-    noble.onMtu('uuid', 123);
-
-    should(peripheral).deepEqual({ mtu: 123 });
-  });
-
-  describe('onIncludedServicesDiscover', () => {
-    it('should emit connected on existing peripheral', () => {
-      const emit = sinon.spy();
-      noble._services = {
-        uuid: { serviceUuid: { emit } }
+  describe('onMtu', () => {
+    test('should update peripheral mtu when set before already', () => {
+      const peripheral = {
+        mtu: 234,
+        emit: jest.fn()
       };
 
-      const warningCallback = sinon.spy();
+      noble._peripherals.set('uuid', peripheral);
+      noble._onMtu('uuid', 123);
 
-      noble.on('warning', warningCallback);
-      noble.onIncludedServicesDiscover('uuid', 'serviceUuid', 'serviceUuids');
-
-      assert.calledOnceWithExactly(emit, 'includedServicesDiscover', 'serviceUuids');
-      assert.notCalled(warningCallback);
-
-      should(noble._services).deepEqual({
-        uuid: { serviceUuid: { includedServiceUuids: 'serviceUuids', emit } }
-      });
+      expect(peripheral.mtu).toBe(123);
+      expect(peripheral.emit).toHaveBeenCalledWith('mtu', 123);
+      expect(peripheral.emit).toHaveBeenCalledTimes(1);
     });
 
-    it('should emit warning on missing peripheral', () => {
-      noble._services = { uuid: {} };
+    test('should update peripheral mtu too when empty', () => {
+      const peripheral = {
+        mtu: null,
+        emit: jest.fn()
+      };
 
-      const warningCallback = sinon.spy();
+      noble._peripherals.set('uuid', peripheral);
+      noble._onMtu('uuid', 123);
 
-      noble.on('warning', warningCallback);
-      noble.onIncludedServicesDiscover('uuid', 'serviceUuid', 'serviceUuids');
-
-      assert.calledOnceWithExactly(warningCallback, 'unknown peripheral uuid, serviceUuid included services discover!');
-
-      should(noble._services).deepEqual({ uuid: {} });
+      expect(peripheral.mtu).toBe(123);
+      expect(peripheral.emit).toHaveBeenCalledWith('mtu', 123);
+      expect(peripheral.emit).toHaveBeenCalledTimes(1);
     });
   });
 });

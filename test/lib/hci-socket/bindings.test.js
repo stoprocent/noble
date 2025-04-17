@@ -6,16 +6,29 @@ const { assert, fake } = sinon;
 describe('hci-socket bindings', () => {
   const AclStream = sinon.stub();
   const Gap = sinon.stub();
+  Gap.prototype.on = sinon.spy();
+  Gap.prototype.setScanParameters = sinon.fake.resolves(null);
+  Gap.prototype.startScanning = sinon.fake.resolves(null);
+  Gap.prototype.stopScanning = sinon.fake.resolves(null);
+  Gap.prototype.setAddress = sinon.fake.resolves(null);
+  Gap.prototype.createLeConn = sinon.fake.resolves(null);
+  Gap.prototype.disconnect = sinon.fake.resolves(null);
+  Gap.prototype.reset = sinon.fake.resolves(null);
 
   const gattOnSpy = sinon.spy();
   const gattExchangeMtuSpy = sinon.spy();
-  const Gatt = sinon.stub();
-  Gatt.prototype.on = gattOnSpy;
-  Gatt.prototype.exchangeMtu = gattExchangeMtuSpy;
+  const Gatt = sinon.stub().returns({
+    on: gattOnSpy,
+    exchangeMtu: gattExchangeMtuSpy
+  });
 
   const createLeConnSpy = sinon.spy();
   const Hci = sinon.stub();
-  Hci.prototype.createLeConn = createLeConnSpy;
+  Hci.prototype.createLeConn = sinon.spy();
+  Hci.prototype.on = sinon.spy();
+  Hci.prototype.init = sinon.spy();
+  Hci.prototype.setAddress = sinon.fake.resolves(null);
+  Hci.prototype.reset = sinon.fake.resolves(null);
   Hci.STATUS_MAPPER = { 1: 'custom mapper' };
 
   const signalingOnSpy = sinon.spy();
@@ -28,7 +41,8 @@ describe('hci-socket bindings', () => {
     './gap': Gap,
     './gatt': Gatt,
     './hci': Hci,
-    './signaling': Signaling
+    './signaling': Signaling,
+    'os': { platform: () => 'linux' }
   });
 
   let bindings;
@@ -40,6 +54,7 @@ describe('hci-socket bindings', () => {
     sinon.stub(process, 'exit');
 
     bindings = new Bindings(options);
+    bindings.start();
     clock = sinon.useFakeTimers();
   });
 
@@ -52,10 +67,14 @@ describe('hci-socket bindings', () => {
 
   it('constructor', () => {
     should(bindings._state).eql(null);
+    should(bindings._isScanning).eql(false);
+    should(bindings._isScanningStarted).eql(false);
 
     should(bindings._addresses).deepEqual({});
     should(bindings._addresseTypes).deepEqual({});
     should(bindings._connectable).deepEqual({});
+    should(bindings._isExtended).eql('extended' in options && options.extended);
+    should(bindings.scannable).deepEqual({});
 
     should(bindings._pendingConnectionUuid).eql(null);
     should(bindings._connectionQueue).deepEqual([]);
@@ -65,14 +84,14 @@ describe('hci-socket bindings', () => {
     should(bindings._aclStreams).deepEqual({});
     should(bindings._signalings).deepEqual({});
 
-    should(bindings._hci).instanceOf(Hci);
-    should(bindings._gap).instanceOf(Gap);
+  });
 
-    assert.calledOnce(Hci);
-    assert.calledWith(Hci, options);
+  it('start', () => {
+    assert.callCount(bindings._gap.on, 4);
+    assert.callCount(bindings._hci.on, 8);
+    assert.calledOnce(bindings._hci.init);
 
-    assert.calledOnce(Gap);
-    assert.calledWith(Gap, bindings._hci);
+    assert.calledTwice(process.on);
   });
 
   describe('onSigInt', () => {
@@ -91,8 +110,6 @@ describe('hci-socket bindings', () => {
   });
 
   it('setScanParameters', () => {
-    bindings._gap.setScanParameters = fake.resolves(null);
-
     bindings.setScanParameters('interval', 'window');
 
     assert.calledOnce(bindings._gap.setScanParameters);
@@ -100,35 +117,72 @@ describe('hci-socket bindings', () => {
   });
 
   describe('startScanning', () => {
-    it('no args', () => {
+    it('no args, already scanning', () => {
+      bindings._isScanning = true;
+      const scanStartSpy = sinon.spy();
+      bindings.on('scanStart', scanStartSpy);
+
+      bindings.startScanning();
+
+      should(bindings._scanServiceUuids).deepEqual([]);
+      assert.calledOnce(scanStartSpy);
+      assert.notCalled(bindings._gap.startScanning);
+    });
+
+    it('no args, not scanning but started', () => {
+      bindings._isScanning = false;
+      bindings._isScanningStarted = true;
       bindings._gap.startScanning = fake.resolves(null);
 
       bindings.startScanning();
 
       should(bindings._scanServiceUuids).deepEqual([]);
-
-      assert.calledOnce(bindings._gap.startScanning);
-      assert.calledWith(bindings._gap.startScanning, undefined);
+      assert.notCalled(bindings._gap.startScanning);
     });
 
-    it('with args', () => {
+    it('with args, first time', () => {
+      bindings._isScanning = false;
+      bindings._isScanningStarted = false;
       bindings._gap.startScanning = fake.resolves(null);
 
       bindings.startScanning(['uuid'], true);
 
       should(bindings._scanServiceUuids).deepEqual(['uuid']);
+      should(bindings._isScanningStarted).true();
 
       assert.calledOnce(bindings._gap.startScanning);
       assert.calledWith(bindings._gap.startScanning, true);
     });
   });
 
-  it('stopScanning', () => {
-    bindings._gap.stopScanning = fake.resolves(null);
+  describe('stopScanning', () => {
+    it('when scanning', () => {
+      bindings._isScanning = true;
+      bindings._gap.stopScanning = fake.resolves(null);
 
-    bindings.stopScanning();
+      bindings.stopScanning();
 
-    assert.calledOnce(bindings._gap.stopScanning);
+      assert.calledOnce(bindings._gap.stopScanning);
+    });
+
+    it('when not scanning', () => {
+      bindings._isScanning = false;
+      bindings._gap.stopScanning = fake.resolves(null);
+      const scanStopSpy = sinon.spy();
+      bindings.on('scanStop', scanStopSpy);
+
+      bindings.stopScanning();
+
+      assert.notCalled(bindings._gap.stopScanning);
+      assert.calledOnce(scanStopSpy);
+    });
+  });
+
+  it('setAddress', () => {
+    bindings.setAddress('test-address');
+
+    assert.calledOnce(bindings._hci.setAddress);
+    assert.calledWith(bindings._hci.setAddress, 'test-address');
   });
 
   describe('connect', () => {
@@ -242,14 +296,6 @@ describe('hci-socket bindings', () => {
     });
   });
 
-  it('reset', () => {
-    bindings._hci.reset = fake.resolves(null);
-
-    bindings.reset();
-
-    assert.calledOnce(bindings._hci.reset);
-  });
-
   describe('updateRssi', () => {
     it('missing handle', () => {
       bindings._hci.readRssi = fake.resolves(null);
@@ -273,36 +319,24 @@ describe('hci-socket bindings', () => {
     });
   });
 
-  it('init', () => {
-    bindings._gap.on = fake.resolves(null);
-    bindings._hci.on = fake.resolves(null);
-    bindings._hci.init = fake.resolves(null);
-
-    bindings.init();
-
-    assert.callCount(bindings._gap.on, 4);
-    assert.callCount(bindings._hci.on, 8);
-    assert.calledOnce(bindings._hci.init);
-
-    assert.calledTwice(process.on);
-  });
-
   describe('stop', () => {
     it('no handles', () => {
-      bindings._gap.stopScanning = fake.resolves(null);
-      bindings._hci.reset = fake.resolves(null);
-      bindings._hci.stop = fake.resolves(null);
-      bindings._sigIntHandler = fake.resolves(null);
-      bindings._exitHandler = fake.resolves(null);
+      bindings._isScanning = true;
+      bindings._gap.stopScanning = sinon.fake.resolves(null);
+      bindings._hci.reset = sinon.fake.resolves(null);
+      bindings._hci.stop = sinon.fake.resolves(null);
+      bindings._sigIntHandler = sinon.spy();
+      bindings._exitHandler = sinon.spy();
       
       bindings.stop();
-
+      
       assert.calledOnce(bindings._gap.stopScanning);
-      assert.calledOnce(bindings._hci.reset);
+      assert.notCalled(bindings._hci.reset);  // Reset is not called in stop()
       assert.calledOnce(bindings._hci.stop);
     });
 
     it('with handles', () => {
+      bindings._isScanning = true;
       bindings._gap.stopScanning = fake.resolves(null);
       bindings._hci.disconnect = fake.resolves(null);
       bindings._hci.reset = fake.resolves(null);

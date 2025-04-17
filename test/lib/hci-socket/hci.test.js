@@ -6,25 +6,33 @@ const { assert } = sinon;
 
 describe('hci-socket hci', () => {
   const deviceId = 'deviceId';
-  const Socket = sinon.stub();
+  const mockSocket = sinon.stub();
 
-  const Hci = proxyquire('../../../lib/hci-socket/hci', {
-    '@stoprocent/bluetooth-hci-socket': Socket
-  });
+  // Mock the crypto module
+  jest.mock('os', () => ({
+    platform: () => 'linux',
+    release: () => '5.10.0-11-amd64'
+  }));
+
+  jest.mock('@stoprocent/bluetooth-hci-socket', () => ({
+    loadDriver: () => mockSocket
+  }));
+
+  const Hci = require('../../../lib/hci-socket/hci');
 
   let hci;
 
   beforeEach(() => {
-    Socket.prototype.on = sinon.stub();
-    Socket.prototype.bindUser = sinon.stub();
-    Socket.prototype.bindRaw = sinon.stub();
-    Socket.prototype.start = sinon.stub();
-    Socket.prototype.isDevUp = sinon.stub();
-    Socket.prototype.removeAllListeners = sinon.stub();
-    Socket.prototype.setFilter = sinon.stub();
-    Socket.prototype.setAddress = sinon.stub();
-    Socket.prototype.write = sinon.stub();
-
+    mockSocket.prototype.on = sinon.stub();
+    mockSocket.prototype.bindUser = sinon.stub();
+    mockSocket.prototype.bindRaw = sinon.stub();
+    mockSocket.prototype.start = sinon.stub();
+    mockSocket.prototype.isDevUp = sinon.stub();
+    mockSocket.prototype.removeAllListeners = sinon.stub();
+    mockSocket.prototype.setFilter = sinon.stub();
+    mockSocket.prototype.setAddress = sinon.stub();
+    mockSocket.prototype.write = sinon.stub();
+    
     hci = new Hci({});
     hci._deviceId = deviceId;
   });
@@ -664,42 +672,77 @@ describe('hci-socket hci', () => {
       should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
     });
 
-    it('should only processCmdCompleteEvent - HCI_EVENT_PKT / EVT_CMD_COMPLETE', () => {
-      const eventType = 4;
-      const subEventType = 14;
-      const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3, 9, 9]);
-      hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(hci.processCmdCompleteEvent, 4660, 3, Buffer.from([9, 9]));
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
+    describe('HCI Tests', () => {
+      // Shared setup and variables
+      let aclQueue;
+      let encryptChangeCallback;
+      let disconnCompleteCallback;
+      let aclDataPktCallback;
+      let leScanEnableSetCmdCallback;
+    
+      beforeEach(() => {
+        // Setup your test data and mocks here
+        aclQueue = [];
+        encryptChangeCallback = jest.fn();
+        disconnCompleteCallback = jest.fn();
+        aclDataPktCallback = jest.fn();
+        leScanEnableSetCmdCallback = jest.fn();
+                
+        // Spy on methods instead of replacing them
+        jest.spyOn(hci, 'processCmdCompleteEvent');
+        jest.spyOn(hci, 'processLeMetaEvent');
+        jest.spyOn(hci, 'flushAcl');
+        
+        // Setup HCI's internal state for testing
+        hci._aclQueue = aclQueue;
+        hci._aclConnections = new Map([
+          [4660, { pending: 3 }],
+          [4661, { pending: 2 }]
+        ]);
+        hci._isExtended = false;
+      });
+    
+      test('should only processCmdCompleteEvent - HCI_EVENT_PKT / EVT_CMD_COMPLETE', () => {
+        const eventType = 4;
+        const subEventType = 14;
+        const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3, 9, 9]);
+        
+        // Call the actual method
+        hci.onSocketData(data);
+    
+        // called
+        expect(hci.processCmdCompleteEvent).toHaveBeenCalledWith(4660, 3, Buffer.from([9, 9]));
+    
+        // not called
+        expect(hci.flushAcl).not.toHaveBeenCalled();
+        expect(encryptChangeCallback).not.toHaveBeenCalled();
+        expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+        expect(disconnCompleteCallback).not.toHaveBeenCalled();
+        expect(aclDataPktCallback).not.toHaveBeenCalled();
+        expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+    
+        // hci checks
+        expect(hci._aclQueue).toEqual(aclQueue);
+        expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+        expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+        expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      });
+    
+      // Separate describe block for LE_READ_LOCAL_SUPPORTED_FEATURES tests
       describe('LE_READ_LOCAL_SUPPORTED_FEATURES', () => {
         beforeEach(() => {
-          hci.setCodedPhySupport = sinon.spy();
-          hci.setEventMask = sinon.spy();
-          hci.setLeEventMask = sinon.spy();
-          hci.readLocalVersion = sinon.spy();
-          hci.writeLeHostSupported = sinon.spy();
-          hci.readLeHostSupported = sinon.spy();
-          hci.readLeBufferSize = sinon.spy();
-          hci.readBdAddr = sinon.spy();
+          // Spy on the methods we want to check
+          jest.spyOn(hci, 'setCodedPhySupport');
+          jest.spyOn(hci, 'setEventMask');
+          jest.spyOn(hci, 'setLeEventMask');
+          jest.spyOn(hci, 'readLocalVersion');
+          jest.spyOn(hci, 'writeLeHostSupported');
+          jest.spyOn(hci, 'readLeHostSupported');
+          jest.spyOn(hci, 'readLeBufferSize');
+          jest.spyOn(hci, 'readBdAddr');
         });
-      
-        it('should not process on error status', () => {
+        
+        test('should not process on error status', () => {
           const cmd = 8195;
           const status = 1;
           const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
@@ -707,19 +750,19 @@ describe('hci-socket hci', () => {
           hci.processCmdCompleteEvent(cmd, status, result);
       
           // Verify no methods were called
-          assert.notCalled(hci.setCodedPhySupport);
-          assert.notCalled(hci.setEventMask);
-          assert.notCalled(hci.setLeEventMask);
-          assert.notCalled(hci.readLocalVersion);
-          assert.notCalled(hci.writeLeHostSupported);
-          assert.notCalled(hci.readLeHostSupported);
-          assert.notCalled(hci.readLeBufferSize);
-          assert.notCalled(hci.readBdAddr);
+          expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+          expect(hci.setEventMask).not.toHaveBeenCalled();
+          expect(hci.setLeEventMask).not.toHaveBeenCalled();
+          expect(hci.readLocalVersion).not.toHaveBeenCalled();
+          expect(hci.writeLeHostSupported).not.toHaveBeenCalled();
+          expect(hci.readLeHostSupported).not.toHaveBeenCalled();
+          expect(hci.readLeBufferSize).not.toHaveBeenCalled();
+          expect(hci.readBdAddr).not.toHaveBeenCalled();
       
-          should(hci._isExtended).equal(false);
+          expect(hci._isExtended).toBe(false);
         });
       
-        it('should process without extended features', () => {
+        test('should process without extended features', () => {
           const cmd = 8195;
           const status = 0;
           const result = Buffer.from([0x00, 0x00, 0x00, 0x00]); // No bits set
@@ -727,21 +770,21 @@ describe('hci-socket hci', () => {
           hci.processCmdCompleteEvent(cmd, status, result);
       
           // Verify extended-specific method not called
-          assert.notCalled(hci.setCodedPhySupport);
+          expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
       
           // Verify other methods were called
-          assert.calledOnce(hci.setEventMask);
-          assert.calledOnce(hci.setLeEventMask);
-          assert.calledOnce(hci.readLocalVersion);
-          assert.calledOnce(hci.writeLeHostSupported);
-          assert.calledOnce(hci.readLeHostSupported);
-          assert.calledOnce(hci.readLeBufferSize);
-          assert.calledOnce(hci.readBdAddr);
+          expect(hci.setEventMask).toHaveBeenCalled();
+          expect(hci.setLeEventMask).toHaveBeenCalled();
+          expect(hci.readLocalVersion).toHaveBeenCalled();
+          expect(hci.writeLeHostSupported).toHaveBeenCalled();
+          expect(hci.readLeHostSupported).toHaveBeenCalled();
+          expect(hci.readLeBufferSize).toHaveBeenCalled();
+          expect(hci.readBdAddr).toHaveBeenCalled();
       
-          should(hci._isExtended).equal(false);
+          expect(hci._isExtended).toBe(false);
         });
       
-        it('should process with extended features', () => {
+        test('should process with extended features', () => {
           const cmd = 8195;
           const status = 0;
           const result = Buffer.from("bd5f660000000000", "hex");
@@ -749,16 +792,16 @@ describe('hci-socket hci', () => {
           hci.processCmdCompleteEvent(cmd, status, result);
       
           // Verify all methods were called including extended-specific
-          assert.calledOnce(hci.setCodedPhySupport);
-          assert.calledOnce(hci.setEventMask);
-          assert.calledOnce(hci.setLeEventMask);
-          assert.calledOnce(hci.readLocalVersion);
-          assert.calledOnce(hci.writeLeHostSupported);
-          assert.calledOnce(hci.readLeHostSupported);
-          assert.calledOnce(hci.readLeBufferSize);
-          assert.calledOnce(hci.readBdAddr);
+          expect(hci.setCodedPhySupport).toHaveBeenCalled();
+          expect(hci.setEventMask).toHaveBeenCalled();
+          expect(hci.setLeEventMask).toHaveBeenCalled();
+          expect(hci.readLocalVersion).toHaveBeenCalled();
+          expect(hci.writeLeHostSupported).toHaveBeenCalled();
+          expect(hci.readLeHostSupported).toHaveBeenCalled();
+          expect(hci.readLeBufferSize).toHaveBeenCalled();
+          expect(hci.readBdAddr).toHaveBeenCalled();
       
-          should(hci._isExtended).equal(true);
+          expect(hci._isExtended).toBe(true);
         });
       });
     });

@@ -1,8 +1,3 @@
-const sinon = require('sinon');
-const should = require('should');
-
-const { assert } = sinon;
-
 const Descriptor = require('../../lib/descriptor');
 
 describe('descriptor', () => {
@@ -15,7 +10,10 @@ describe('descriptor', () => {
   let descriptor = null;
 
   beforeEach(() => {
-    mockNoble = {};
+    mockNoble = {
+      readValue: jest.fn(),
+      writeValue: jest.fn()
+    };
 
     descriptor = new Descriptor(
       mockNoble,
@@ -26,11 +24,15 @@ describe('descriptor', () => {
     );
   });
 
-  it('should have a uuid', () => {
-    should(descriptor.uuid).equal(mockUuid);
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
-  it('should lookup name and type by uuid', () => {
+  test('should have a uuid', () => {
+    expect(descriptor.uuid).toEqual(mockUuid);
+  });
+
+  test('should lookup name and type by uuid', () => {
     descriptor = new Descriptor(
       mockNoble,
       mockPeripheralId,
@@ -39,211 +41,176 @@ describe('descriptor', () => {
       '2900'
     );
 
-    should(descriptor.name).equal('Characteristic Extended Properties');
-    should(descriptor.type).equal(
+    expect(descriptor.name).toEqual('Characteristic Extended Properties');
+    expect(descriptor.type).toEqual(
       'org.bluetooth.descriptor.gatt.characteristic_extended_properties'
     );
   });
 
   describe('toString', () => {
-    it('should be uuid, name, type', () => {
-      should(descriptor.toString()).equal(
+    test('should be uuid, name, type', () => {
+      expect(descriptor.toString()).toEqual(
         '{"uuid":"mock-uuid","name":null,"type":null}'
       );
     });
   });
 
   describe('readValue', () => {
-    beforeEach(() => {
-      mockNoble.readValue = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should delegate to noble', () => {
+    test('should delegate to noble', () => {
       descriptor.readValue();
 
-      assert.calledOnceWithExactly(
-        mockNoble.readValue,
+      expect(mockNoble.readValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid
       );
+      expect(mockNoble.readValue).toHaveBeenCalledTimes(1);
     });
 
-    it('should callback', () => {
-      const callback = sinon.spy();
+    test('should callback', () => {
+      const callback = jest.fn();
 
       descriptor.readValue(callback);
       descriptor.emit('valueRead');
       // Check for single callback
       descriptor.emit('valueRead');
 
-      assert.calledOnceWithExactly(callback, null, undefined);
-      assert.calledOnceWithExactly(
-        mockNoble.readValue,
+      expect(callback).toHaveBeenCalledWith(undefined, undefined);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockNoble.readValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid
       );
+      expect(mockNoble.readValue).toHaveBeenCalledTimes(1);
     });
 
-    it('should callback with error, data', () => {
+    test('should callback with error, data', () => {
       const mockData = Buffer.alloc(0);
-      const callback = sinon.spy();
+      const callback = jest.fn();
 
       descriptor.readValue(callback);
       descriptor.emit('valueRead', mockData);
       // Check for single callback
       descriptor.emit('valueRead', mockData);
 
-      assert.calledOnceWithExactly(callback, null, mockData);
-      assert.calledOnceWithExactly(
-        mockNoble.readValue,
+      expect(callback).toHaveBeenCalledWith(undefined, mockData);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockNoble.readValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid
       );
+      expect(mockNoble.readValue).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('readValueAsync', () => {
-    beforeEach(() => {
-      mockNoble.readValue = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should delegate to noble', async () => {
+    test('should delegate to noble', async () => {
       const promise = descriptor.readValueAsync();
       descriptor.emit('valueRead');
-      // Check for single callback
-      descriptor.emit('valueRead');
-
-      should(promise).resolvedWith(undefined);
-      assert.calledOnceWithExactly(
-        mockNoble.readValue,
+      
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockNoble.readValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid
       );
+      expect(mockNoble.readValue).toHaveBeenCalledTimes(1);
     });
 
-    it('should resolve with data', async () => {
+    test('should resolve with data', async () => {
       const mockData = Buffer.alloc(0);
 
       const promise = descriptor.readValueAsync();
       descriptor.emit('valueRead', mockData);
-      // Check for single callback
-      descriptor.emit('valueRead', mockData);
-
-      should(promise).resolvedWith(mockData);
-      assert.calledOnceWithExactly(
-        mockNoble.readValue,
+      
+      await expect(promise).resolves.toEqual(mockData);
+      expect(mockNoble.readValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid
       );
+      expect(mockNoble.readValue).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('writeValue', () => {
-    beforeEach(() => {
-      mockNoble.writeValue = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should only accept data as a buffer', () => {
+    test('should only accept data as a buffer', () => {
       const mockData = {};
 
-      should(() => descriptor.writeValue(mockData)).throw(
+      expect(() => descriptor.writeValue(mockData)).toThrow(
         'data must be a Buffer'
       );
 
-      assert.notCalled(mockNoble.writeValue);
+      expect(mockNoble.writeValue).not.toHaveBeenCalled();
     });
 
-    it('should delegate to noble', () => {
+    test('should delegate to noble', () => {
       const mockData = Buffer.alloc(0);
       descriptor.writeValue(mockData);
 
-      assert.calledOnceWithExactly(
-        mockNoble.writeValue,
+      expect(mockNoble.writeValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid,
         mockData
       );
+      expect(mockNoble.writeValue).toHaveBeenCalledTimes(1);
     });
 
-    it('should callback', () => {
+    test('should callback', () => {
       const mockData = Buffer.alloc(0);
-      const callback = sinon.spy();
+      const callback = jest.fn();
 
       descriptor.writeValue(mockData, callback);
       descriptor.emit('valueWrite');
       // Check for single callback
       descriptor.emit('valueWrite');
 
-      assert.calledOnceWithExactly(callback, null);
-      assert.calledOnceWithExactly(
-        mockNoble.writeValue,
+      expect(callback).toHaveBeenCalledWith(undefined);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockNoble.writeValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid,
         mockData
       );
+      expect(mockNoble.writeValue).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('writeValueAsync', () => {
-    beforeEach(() => {
-      mockNoble.writeValue = sinon.spy();
-    });
-
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should only accept data as a buffer', async () => {
+    test('should only accept data as a buffer', async () => {
       const mockData = {};
 
-      const promise = descriptor.writeValueAsync(mockData);
-
-      should(promise).rejectedWith('data must be a Buffer');
+      await expect(descriptor.writeValueAsync(mockData)).rejects.toThrow(
+        'data must be a Buffer'
+      );
     });
 
-    it('should delegate to noble', async () => {
+    test('should delegate to noble', async () => {
       const mockData = Buffer.alloc(0);
 
       const promise = descriptor.writeValueAsync(mockData);
       descriptor.emit('valueWrite');
-      // Check for single callback
-      descriptor.emit('valueWrite');
-
-      should(promise).resolvedWith(undefined);
-      assert.calledOnceWithExactly(
-        mockNoble.writeValue,
+      
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockNoble.writeValue).toHaveBeenCalledWith(
         mockPeripheralId,
         mockServiceUuid,
         mockCharacteristicUuid,
         mockUuid,
         mockData
       );
+      expect(mockNoble.writeValue).toHaveBeenCalledTimes(1);
     });
   });
 });
