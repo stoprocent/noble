@@ -47,7 +47,6 @@ Napi::Value NobleMac::Start(const Napi::CallbackInfo& info)
 Napi::Value NobleMac::Stop(const Napi::CallbackInfo& info) 
 {
     CHECK_MANAGER()
-    CFRelease((__bridge CFTypeRef)manager);
     manager = nil;
     return info.Env().Undefined();
 }

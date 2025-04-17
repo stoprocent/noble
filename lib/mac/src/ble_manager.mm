@@ -352,9 +352,33 @@
     std::string serviceUuid = [descriptor.characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [descriptor.characteristic.UUID.UUIDString UTF8String];
     std::string descriptorUuid = [descriptor.UUID.UUIDString UTF8String];
-    const UInt8* bytes = (UInt8 *)[descriptor.value bytes];
+    
     Data data;
-    data.assign(bytes, bytes+[descriptor.value length]);
+    
+    if (descriptor.value != nil) {
+        if ([descriptor.value isKindOfClass:[NSData class]]) {
+            // Handle NSData directly
+            NSData *valueData = (NSData *)descriptor.value;
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        } 
+        else if ([descriptor.value isKindOfClass:[NSString class]]) {
+            // Convert NSString to bytes
+            NSString *valueString = (NSString *)descriptor.value;
+            NSData *valueData = [valueString dataUsingEncoding:NSUTF8StringEncoding];
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        }
+        else if ([descriptor.value isKindOfClass:[NSNumber class]]) {
+            // Convert NSNumber to bytes
+            NSNumber *valueNumber = (NSNumber *)descriptor.value;
+            NSData *valueData = [NSData dataWithBytes:valueNumber.stringValue.UTF8String 
+                                             length:strlen(valueNumber.stringValue.UTF8String)];
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        }
+    }
+    
     IF(NSNumber*, handle, [self getDescriptorHandle:descriptor]) {
         emit.ReadHandle(uuid, [handle intValue], data);
     }
