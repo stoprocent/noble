@@ -78,6 +78,7 @@ declare module '@stoprocent/noble' {
         txPowerLevel: number;
         manufacturerData: Buffer;
         serviceUuids: string[];
+        serviceSolicitationUuids: string[];
     }
 
     export class Peripheral extends EventEmitter {
