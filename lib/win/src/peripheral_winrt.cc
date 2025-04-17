@@ -165,6 +165,7 @@ void PeripheralWinrt::Disconnect()
     cachedServices.clear();
     if (device.has_value() && connectionToken)
     {
+        device->Close();
         device->ConnectionStatusChanged(connectionToken);
     }
     device = std::nullopt;
