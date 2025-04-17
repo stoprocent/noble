@@ -244,6 +244,12 @@ void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
 void BLEManager::StopScan()
 {
     mAdvertismentWatcher.Stop();
+    
+    auto status = mAdvertismentWatcher.Status();
+    if (status == BluetoothLEAdvertisementWatcherStatus::Stopped ||
+        status == BluetoothLEAdvertisementWatcherStatus::Aborted) {
+        mEmit.ScanState(false);
+    }
 }
 
 void BLEManager::OnScanStopped(BluetoothLEAdvertisementWatcher watcher,
