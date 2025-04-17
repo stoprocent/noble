@@ -35,13 +35,13 @@
     
     NSDictionary *options = @{CBCentralManagerScanOptionAllowDuplicatesKey:[NSNumber numberWithBool:allowDuplicates]};
     [self.centralManager scanForPeripheralsWithServices:advServicesUuid options:options];
-    emit.ScanState(isScanning);
+    emit.ScanState(true);
 }
 
 - (void)stopScan 
 {
     [self.centralManager stopScan];
-    emit.ScanState(isScanning);
+    emit.ScanState(false);
 }
 
 - (void) centralManager:(CBCentralManager *)central 

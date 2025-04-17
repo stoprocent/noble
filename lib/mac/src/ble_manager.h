@@ -9,7 +9,6 @@
 @interface BLEManager : NSObject <CBCentralManagerDelegate, CBPeripheralDelegate> {
     Emit emit;
     bool pendingRead;
-    bool isScanning;
 }
 @property (strong) CBCentralManager *centralManager;
 @property dispatch_queue_t dispatchQueue;
