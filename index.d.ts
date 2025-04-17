@@ -17,6 +17,8 @@ declare module '@stoprocent/noble' {
 
     export type PeripheralIdOrAddress = string;
 
+    export type CharacteristicProperty = 'read' | 'write' | 'indicate' | 'notify' | 'writeWithoutResponse';
+
     export interface ConnectOptions {
         addressType?: PeripheralAddressType;
         minInterval?: number;
@@ -29,12 +31,13 @@ declare module '@stoprocent/noble' {
     
         constructor(bindings: any);
         
-        readonly state: State;
+        readonly state: AdapterState;
         readonly address: string;
     
         waitForPoweredOnAsync(timeout?: number): Promise<void>;
         startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
         stopScanningAsync(): Promise<void>;
+        discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
         connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
     
         startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
@@ -45,19 +48,19 @@ declare module '@stoprocent/noble' {
         stop(): void;
         setAddress(address: string): void;
     
-        on(event: "stateChange", listener: (state: State) => void): this;
+        on(event: "stateChange", listener: (state: AdapterState) => void): this;
         on(event: "scanStart", listener: () => void): this;
         on(event: "scanStop", listener: () => void): this;
         on(event: "discover", listener: (peripheral: Peripheral) => void): this;
         on(event: string, listener: Function): this;
     
-        once(event: "stateChange", listener: (state: State) => void): this;
+        once(event: "stateChange", listener: (state: AdapterState) => void): this;
         once(event: "scanStart", listener: () => void): this;
         once(event: "scanStop", listener: () => void): this;
         once(event: "discover", listener: (peripheral: Peripheral) => void): this;
         once(event: string, listener: Function): this;
     
-        removeListener(event: "stateChange", listener: (state: State) => void): this;
+        removeListener(event: "stateChange", listener: (state: AdapterState) => void): this;
         removeListener(event: "scanStart", listener: () => void): this;
         removeListener(event: "scanStop", listener: () => void): this;
         removeListener(event: "discover", listener: (peripheral: Peripheral) => void): this;
@@ -166,7 +169,7 @@ declare module '@stoprocent/noble' {
         readonly uuid: string;
         readonly name: string;
         readonly type: string;
-        readonly properties: string[];
+        readonly properties: CharacteristicProperty[];
         readonly descriptors: Descriptor[];
     
         readAsync(): Promise<Buffer>;
