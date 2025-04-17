@@ -11,7 +11,7 @@ const noble = require('..');
 const ECHO_SERVICE_UUID = 'ec00';
 const ECHO_CHARACTERISTIC_UUID = 'ec0e';
 
-async function main() {
+async function main () {
   try {
     // Wait for the BLE adapter to be ready
     console.log('Waiting for powered on');
@@ -35,13 +35,13 @@ noble.on('discover', async (peripheral) => {
   connectAndSetUp(peripheral);
 });
 
-async function connectAndSetUp(peripheral) {
+async function connectAndSetUp (peripheral) {
   try {
     await peripheral.connectAsync();
     console.log('Connected to', peripheral.id);
 
     // // specify the services and characteristics to discover
-    const { services, characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+    const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
       [ECHO_SERVICE_UUID],
       [ECHO_CHARACTERISTIC_UUID]
     );

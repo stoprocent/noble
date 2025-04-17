@@ -1,6 +1,6 @@
 const noble = require('../index');
 
-async function main() {
+async function main () {
   try {
     // Wait for the BLE adapter to be ready
     console.log('Waiting for powered on state');

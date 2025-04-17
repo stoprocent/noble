@@ -1,6 +1,6 @@
 const noble = require('../index');
 
-async function handleDiscovery(peripheral) {
+async function handleDiscovery (peripheral) {
   console.log(`\n${new Date()}`);
   console.log(
     `Peripheral discovered (${peripheral.id}):
@@ -42,7 +42,7 @@ async function handleDiscovery(peripheral) {
   }
 }
 
-async function main() {
+async function main () {
   try {
     console.log('Waiting for Bluetooth adapter...');
     await noble.waitForPoweredOnAsync();
