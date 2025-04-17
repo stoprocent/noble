@@ -50,7 +50,6 @@
     "eslint-plugin-promise": "^7.1.0",
     "jshint": "^2.13.6",
     "mocha": "^10.7.0",
-    "nyc": "^17.0.0",
     "prebuildify": "^6.0.1",
     "prebuildify-cross": "^5.1.1",
     "prettier": "^3.3.3",
@@ -69,7 +68,6 @@
     "semantic-release": "semantic-release",
     "pretest": "npm run rebuild",
     "rebuild": "node-gyp rebuild",
-    "coverage": "nyc npm test && nyc report --reporter=text-lcov > .nyc_output/lcov.info",
     "test": "cross-env NODE_ENV=test mocha --recursive \"test/*.test.js\" \"test/**/*.test.js\" --exit"
   },
   "publishConfig": {

@@ -1,4 +1,0 @@
-{
-  "all": true,
-  "exclude": ["examples/**", "test/**", "test.js", "ws-slave.js", ".eslintrc.js", "coverage/**"]
-}

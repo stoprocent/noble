@@ -256,11 +256,3 @@ declare module '@stoprocent/noble' {
     const NobleDefault: Noble;
     export default NobleDefault;
 }
-
-
-
-
-
-
-
-
