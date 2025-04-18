@@ -1,188 +1,192 @@
-const proxyquire = require('proxyquire').noCallThru();
-const should = require('should');
-const sinon = require('sinon');
-const { assert, fake, match } = sinon;
+const { jest: jestFn } = require('@jest/globals');
+
+// Use jest.mock instead of proxyquire
+jest.mock('../../../lib/hci-socket/smp', () => {
+  return jest.fn().mockImplementation(() => ({
+    on: jest.fn().mockResolvedValue(null),
+    removeListener: jest.fn().mockResolvedValue(null),
+    sendPairingRequest: jest.fn().mockResolvedValue(null)
+  }));
+});
+
+const Smp = require('../../../lib/hci-socket/smp');
+const AclStream = require('../../../lib/hci-socket/acl-stream');
 
 describe('hci-socket acl-stream', () => {
-  const Smp = sinon.stub();
-
-  const AclStream = proxyquire('../../../lib/hci-socket/acl-stream', {
-    './smp': Smp
-  });
-
   beforeEach(() => {
-    Smp.prototype.on = fake.resolves(null);
-    Smp.prototype.removeListener = fake.resolves(null);
-  });
-
-  afterEach(() => {
-    sinon.reset();
+    jest.clearAllMocks();
   });
 
   it('constructor', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    should(aclStream._hci).eql(hci);
-    should(aclStream._handle).eql(handle);
+    expect(aclStream._hci).toBe(hci);
+    expect(aclStream._handle).toBe(handle);
 
-    should(aclStream._smp).instanceOf(Smp);
+    expect(Smp).toHaveBeenCalledTimes(1);
+    expect(Smp).toHaveBeenCalledWith(aclStream, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    assert.calledOnce(Smp);
-    assert.calledWith(Smp, aclStream, localAddressType, localAddress, remoteAddressType, remoteAddress);
-
-    assert.calledThrice(aclStream._smp.on);
-    assert.calledWith(aclStream._smp.on, 'stk', match.any);
-    assert.calledWith(aclStream._smp.on, 'fail', match.any);
-    assert.calledWith(aclStream._smp.on, 'end', match.any);
+    expect(aclStream._smp.on).toHaveBeenCalledTimes(3);
+    expect(aclStream._smp.on).toHaveBeenCalledWith('stk', expect.any(Function));
+    expect(aclStream._smp.on).toHaveBeenCalledWith('fail', expect.any(Function));
+    expect(aclStream._smp.on).toHaveBeenCalledWith('end', expect.any(Function));
   });
 
   it('encrypt', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
-
-    aclStream._smp.sendPairingRequest = fake.resolves(null);
 
     aclStream.encrypt();
 
-    assert.calledOnceWithExactly(aclStream._smp.sendPairingRequest);
+    expect(aclStream._smp.sendPairingRequest).toHaveBeenCalledTimes(1);
+    expect(aclStream._smp.sendPairingRequest).toHaveBeenCalledWith();
   });
 
   it('write', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
+
+    hci.writeAclDataPkt = jest.fn().mockResolvedValue(null);
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
-
-    aclStream._hci.writeAclDataPkt = fake.resolves(null);
 
     aclStream.write('cid', 'data');
 
-    assert.calledOnceWithExactly(aclStream._hci.writeAclDataPkt, handle, 'cid', 'data');
+    expect(hci.writeAclDataPkt).toHaveBeenCalledTimes(1);
+    expect(hci.writeAclDataPkt).toHaveBeenCalledWith(handle, 'cid', 'data');
   });
 
   it('push data', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    const eventEmmitted = fake.resolves(null);
-    aclStream.on('data', eventEmmitted);
+    const eventEmitted = jest.fn().mockResolvedValue(null);
+    aclStream.on('data', eventEmitted);
 
     aclStream.push('cid', 'data');
 
-    assert.calledOnceWithExactly(eventEmmitted, 'cid', 'data');
+    expect(eventEmitted).toHaveBeenCalledTimes(1);
+    expect(eventEmitted).toHaveBeenCalledWith('cid', 'data');
   });
 
   it('push no data', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    const eventEmmitted = fake.resolves(null);
-    aclStream.on('end', eventEmmitted);
+    const eventEmitted = jest.fn().mockResolvedValue(null);
+    aclStream.on('end', eventEmitted);
 
     aclStream.push('cid');
 
-    assert.calledOnceWithExactly(eventEmmitted);
+    expect(eventEmitted).toHaveBeenCalledTimes(1);
+    expect(eventEmitted).toHaveBeenCalledWith();
   });
 
   it('pushEncrypt', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    const eventEmmitted = fake.resolves(null);
-    aclStream.on('encrypt', eventEmmitted);
+    const eventEmitted = jest.fn().mockResolvedValue(null);
+    aclStream.on('encrypt', eventEmitted);
 
     aclStream.pushEncrypt('cid');
 
-    assert.calledOnceWithExactly(eventEmmitted, 'cid');
+    expect(eventEmitted).toHaveBeenCalledTimes(1);
+    expect(eventEmitted).toHaveBeenCalledWith('cid');
   });
 
   it('onSmpStk', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
+
+    hci.startLeEncryption = jest.fn().mockResolvedValue(null);
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
-
-    aclStream._hci.startLeEncryption = fake.resolves(null);
 
     aclStream.onSmpStk('stk');
 
-    assert.calledOnceWithExactly(aclStream._hci.startLeEncryption, handle, Buffer.from('0000000000000000', 'hex'), Buffer.from('0000', 'hex'), 'stk');
+    expect(hci.startLeEncryption).toHaveBeenCalledTimes(1);
+    expect(hci.startLeEncryption).toHaveBeenCalledWith(
+      handle, 
+      Buffer.from('0000000000000000', 'hex'), 
+      Buffer.from('0000', 'hex'), 
+      'stk'
+    );
   });
 
   it('onSmpFail', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    const eventEmmitted = fake.resolves(null);
-    aclStream.on('encryptFail', eventEmmitted);
+    const eventEmitted = jest.fn().mockResolvedValue(null);
+    aclStream.on('encryptFail', eventEmitted);
 
     aclStream.onSmpFail();
 
-    assert.calledOnceWithExactly(eventEmmitted);
+    expect(eventEmitted).toHaveBeenCalledTimes(1);
+    expect(eventEmitted).toHaveBeenCalledWith();
   });
 
   it('onSmpEnd', () => {
-    const hci = fake.resolves();
-    const handle = fake.resolves();
-    const localAddressType = fake.resolves();
-    const localAddress = fake.resolves();
-    const remoteAddressType = fake.resolves();
-    const remoteAddress = fake.resolves();
+    const hci = jest.fn().mockResolvedValue();
+    const handle = jest.fn().mockResolvedValue();
+    const localAddressType = jest.fn().mockResolvedValue();
+    const localAddress = jest.fn().mockResolvedValue();
+    const remoteAddressType = jest.fn().mockResolvedValue();
+    const remoteAddress = jest.fn().mockResolvedValue();
 
     const aclStream = new AclStream(hci, handle, localAddressType, localAddress, remoteAddressType, remoteAddress);
 
-    aclStream._smp.sendPairingRequest = fake.resolves(null);
-
     aclStream.onSmpEnd();
 
-    assert.calledThrice(aclStream._smp.removeListener);
-    assert.calledWith(aclStream._smp.removeListener, 'stk', match.any);
-    assert.calledWith(aclStream._smp.removeListener, 'fail', match.any);
-    assert.calledWith(aclStream._smp.removeListener, 'end', match.any);
+    expect(aclStream._smp.removeListener).toHaveBeenCalledTimes(3);
+    expect(aclStream._smp.removeListener).toHaveBeenCalledWith('stk', expect.any(Function));
+    expect(aclStream._smp.removeListener).toHaveBeenCalledWith('fail', expect.any(Function));
+    expect(aclStream._smp.removeListener).toHaveBeenCalledWith('end', expect.any(Function));
   });
 });

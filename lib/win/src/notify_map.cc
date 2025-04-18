@@ -1,10 +1,3 @@
-//
-//  notify_map.cc
-//  noble-winrt-native
-//
-//  Created by Georg Vienna on 07.09.18.
-//
-
 #include "notify_map.h"
 
 bool Key::operator==(const Key& other) const

@@ -1,9 +1,3 @@
-//
-//  objc_cpp.mm
-//  noble-mac-native
-//
-//  Created by Georg Vienna on 30.08.18.
-//
 #include "objc_cpp.h"
 
 #if defined(MAC_OS_X_VERSION_10_13)

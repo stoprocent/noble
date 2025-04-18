@@ -1,268 +1,270 @@
-const should = require('should');
-const sinon = require('sinon');
-const proxyquire = require('proxyquire').noCallThru();
+// Mock the crypto module
+jest.mock('../../../lib/hci-socket/crypto', () => ({
+  r: jest.fn(),
+  c1: jest.fn(),
+  s1: jest.fn()
+}));
 
-const crypto = {};
-const { assert } = sinon;
-const Smp = proxyquire('../../../lib/hci-socket/smp', { './crypto': crypto });
+// Import the mocked modules
+const crypto = require('../../../lib/hci-socket/crypto');
+const Smp = require('../../../lib/hci-socket/smp');
 
 describe('hci-socket smp', () => {
   let smp;
-
-  const aclStream = {};
+  let aclStream;
+  
   const localAddressType = 'public';
   const localAddress = 'aa:bb:cc:dd:ee:ff';
   const remoteAddressType = 'random';
   const remoteAddress = '00:11:22:33:44:55';
 
   beforeEach(() => {
-    aclStream.on = sinon.spy();
-    aclStream.removeListener = sinon.spy();
-    aclStream.write = sinon.spy();
+    aclStream = {
+      on: jest.fn(),
+      removeListener: jest.fn(),
+      write: jest.fn()
+    };
 
     smp = new Smp(aclStream, localAddressType, localAddress, remoteAddressType, remoteAddress);
   });
 
   afterEach(() => {
-    sinon.reset();
+    jest.clearAllMocks();
   });
 
-  it('construct 1', () => {
-    assert.callCount(aclStream.on, 2);
-    assert.calledWithMatch(aclStream.on, 'data', sinon.match.func);
-    assert.calledWithMatch(aclStream.on, 'end', sinon.match.func);
+  test('construct 1', () => {
+    expect(aclStream.on).toHaveBeenCalledTimes(2);
+    expect(aclStream.on).toHaveBeenCalledWith('data', expect.any(Function));
+    expect(aclStream.on).toHaveBeenCalledWith('end', expect.any(Function));
 
-    should(smp._iat).deepEqual(Buffer.from([0x00]));
-    should(smp._ia).deepEqual(Buffer.from([0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]));
-    should(smp._rat).deepEqual(Buffer.from([0x01]));
-    should(smp._ra).deepEqual(Buffer.from([0x55, 0x44, 0x33, 0x22, 0x11, 0x00]));
+    expect(smp._iat).toEqual(Buffer.from([0x00]));
+    expect(smp._ia).toEqual(Buffer.from([0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]));
+    expect(smp._rat).toEqual(Buffer.from([0x01]));
+    expect(smp._ra).toEqual(Buffer.from([0x55, 0x44, 0x33, 0x22, 0x11, 0x00]));
   });
 
-  it('construct 2', () => {
-    sinon.reset(aclStream);
+  test('construct 2', () => {
+    jest.clearAllMocks();
     const smp = new Smp(aclStream, remoteAddressType, remoteAddress, localAddressType, localAddress);
 
-    assert.callCount(aclStream.on, 2);
-    assert.calledWithMatch(aclStream.on, 'data', sinon.match.func);
-    assert.calledWithMatch(aclStream.on, 'end', sinon.match.func);
+    expect(aclStream.on).toHaveBeenCalledTimes(2);
+    expect(aclStream.on).toHaveBeenCalledWith('data', expect.any(Function));
+    expect(aclStream.on).toHaveBeenCalledWith('end', expect.any(Function));
 
-    should(smp._iat).deepEqual(Buffer.from([0x01]));
-    should(smp._ia).deepEqual(Buffer.from([0x55, 0x44, 0x33, 0x22, 0x11, 0x00]));
-    should(smp._rat).deepEqual(Buffer.from([0x00]));
-    should(smp._ra).deepEqual(Buffer.from([0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]));
+    expect(smp._iat).toEqual(Buffer.from([0x01]));
+    expect(smp._ia).toEqual(Buffer.from([0x55, 0x44, 0x33, 0x22, 0x11, 0x00]));
+    expect(smp._rat).toEqual(Buffer.from([0x00]));
+    expect(smp._ra).toEqual(Buffer.from([0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]));
   });
 
-  it('should write sendPairingRequest', () => {
-    smp.write = sinon.spy();
+  test('should write sendPairingRequest', () => {
+    smp.write = jest.fn();
 
     smp.sendPairingRequest();
 
-    assert.calledOnceWithExactly(smp.write, Buffer.from([0x01, 0x03, 0x00, 0x01, 0x10, 0x00, 0x01]));
+    expect(smp.write).toHaveBeenCalledWith(Buffer.from([0x01, 0x03, 0x00, 0x01, 0x10, 0x00, 0x01]));
   });
 
   describe('onAclStreamData', () => {
     beforeEach(() => {
-      smp.handlePairingResponse = sinon.spy();
-      smp.handlePairingConfirm = sinon.spy();
-      smp.handlePairingRandom = sinon.spy();
-      smp.handlePairingFailed = sinon.spy();
-      smp.handleEncryptInfo = sinon.spy();
-      smp.handleMasterIdent = sinon.spy();
+      smp.handlePairingResponse = jest.fn();
+      smp.handlePairingConfirm = jest.fn();
+      smp.handlePairingRandom = jest.fn();
+      smp.handlePairingFailed = jest.fn();
+      smp.handleEncryptInfo = jest.fn();
+      smp.handleMasterIdent = jest.fn();
     });
 
-    it('should do nothing with !SMP_CID', () => {
+    test('should do nothing with !SMP_CID', () => {
       smp.onAclStreamData(0);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handlePairingResponse', () => {
+    test('should handlePairingResponse', () => {
       const data = Buffer.from([0x02, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.calledOnceWithExactly(smp.handlePairingResponse, data);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).toHaveBeenCalledWith(data);
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handlePairingConfirm', () => {
+    test('should handlePairingConfirm', () => {
       const data = Buffer.from([0x03, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.calledOnceWithExactly(smp.handlePairingConfirm, data);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).toHaveBeenCalledWith(data);
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handlePairingRandom', () => {
+    test('should handlePairingRandom', () => {
       const data = Buffer.from([0x04, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.calledOnceWithExactly(smp.handlePairingRandom, data);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).toHaveBeenCalledWith(data);
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handlePairingFailed', () => {
+    test('should handlePairingFailed', () => {
       const data = Buffer.from([0x05, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.calledOnceWithExactly(smp.handlePairingFailed, data);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).toHaveBeenCalledWith(data);
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handleEncryptInfo', () => {
+    test('should handleEncryptInfo', () => {
       const data = Buffer.from([0x06, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.calledOnceWithExactly(smp.handleEncryptInfo, data);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).toHaveBeenCalledWith(data);
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
 
-    it('should handleMasterIdent', () => {
+    test('should handleMasterIdent', () => {
       const data = Buffer.from([0x07, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.calledOnceWithExactly(smp.handleMasterIdent, data);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).toHaveBeenCalledWith(data);
     });
 
-    it('should do nothing on bad code', () => {
+    test('should do nothing on bad code', () => {
       const data = Buffer.from([0x08, 0x33, 0x44]);
       smp.onAclStreamData(6, data);
 
-      assert.notCalled(smp.handlePairingResponse);
-      assert.notCalled(smp.handlePairingConfirm);
-      assert.notCalled(smp.handlePairingRandom);
-      assert.notCalled(smp.handlePairingFailed);
-      assert.notCalled(smp.handleEncryptInfo);
-      assert.notCalled(smp.handleMasterIdent);
+      expect(smp.handlePairingResponse).not.toHaveBeenCalled();
+      expect(smp.handlePairingConfirm).not.toHaveBeenCalled();
+      expect(smp.handlePairingRandom).not.toHaveBeenCalled();
+      expect(smp.handlePairingFailed).not.toHaveBeenCalled();
+      expect(smp.handleEncryptInfo).not.toHaveBeenCalled();
+      expect(smp.handleMasterIdent).not.toHaveBeenCalled();
     });
   });
 
-  it('onAclStreamEnd', () => {
-    const callback = sinon.spy();
+  test('onAclStreamEnd', () => {
+    const callback = jest.fn();
     smp.on('end', callback);
     smp.onAclStreamEnd();
 
-    assert.callCount(aclStream.removeListener, 2);
-    assert.calledWithMatch(aclStream.removeListener, 'data', sinon.match.func);
-    assert.calledWithMatch(aclStream.removeListener, 'end', sinon.match.func);
-    assert.calledOnceWithExactly(callback);
+    expect(aclStream.removeListener).toHaveBeenCalledTimes(2);
+    expect(aclStream.removeListener).toHaveBeenCalledWith('data', expect.any(Function));
+    expect(aclStream.removeListener).toHaveBeenCalledWith('end', expect.any(Function));
+    expect(callback).toHaveBeenCalled();
   });
 
-  it('handlePairingResponse', () => {
-    smp.write = sinon.spy();
-    crypto.r = sinon.spy();
-    crypto.c1 = sinon.fake.returns(Buffer.from([0x99]));
+  test('handlePairingResponse', () => {
+    smp.write = jest.fn();
+    crypto.c1.mockReturnValue(Buffer.from([0x99]));
 
     smp.handlePairingResponse('data');
 
-    should(smp._pres).equal('data');
-
-    assert.calledOnceWithExactly(crypto.r);
-    assert.calledOnce(crypto.c1);
-    assert.calledOnceWithExactly(smp.write, Buffer.from([0x03, 0x99]));
+    expect(smp._pres).toBe('data');
+    expect(crypto.r).toHaveBeenCalled();
+    expect(crypto.c1).toHaveBeenCalled();
+    expect(smp.write).toHaveBeenCalledWith(Buffer.from([0x03, 0x99]));
   });
 
-  it('handlePairingConfirm', () => {
-    smp.write = sinon.spy();
+  test('handlePairingConfirm', () => {
+    smp.write = jest.fn();
     smp._r = Buffer.from([0x99]);
 
     smp.handlePairingConfirm('data');
 
-    should(smp._pcnf).equal('data');
-
-    assert.calledOnceWithExactly(smp.write, Buffer.from([0x04, 0x99]));
+    expect(smp._pcnf).toBe('data');
+    expect(smp.write).toHaveBeenCalledWith(Buffer.from([0x04, 0x99]));
   });
 
   describe('handlePairingRandom', () => {
-    it('should emit stk', () => {
-      crypto.c1 = sinon.fake.returns(Buffer.from([0x99]));
-      crypto.s1 = sinon.fake.returns('stk_answer');
+    test('should emit stk', () => {
+      crypto.c1.mockReturnValue(Buffer.from([0x99]));
+      crypto.s1.mockReturnValue('stk_answer');
 
       const data = Buffer.from([0, 1]);
-      const callback = sinon.spy();
-      const failCallback = sinon.spy();
+      const callback = jest.fn();
+      const failCallback = jest.fn();
 
       smp._pcnf = Buffer.from([3, 153]);
       smp.on('stk', callback);
       smp.on('fail', failCallback);
       smp.handlePairingRandom(data);
 
-      assert.calledOnceWithExactly(callback, 'stk_answer');
-      assert.notCalled(failCallback);
+      expect(callback).toHaveBeenCalledWith('stk_answer');
+      expect(failCallback).not.toHaveBeenCalled();
     });
 
-    it('should write and emit fail stk', () => {
-      crypto.c1 = sinon.fake.returns(Buffer.from([0x99]));
-      crypto.s1 = sinon.fake.returns('stk_answer');
+    test('should write and emit fail stk', () => {
+      crypto.c1.mockReturnValue(Buffer.from([0x99]));
+      crypto.s1.mockReturnValue('stk_answer');
 
       const data = Buffer.from([0, 1]);
-      const callback = sinon.spy();
-      const failCallback = sinon.spy();
+      const callback = jest.fn();
+      const failCallback = jest.fn();
 
-      smp.write = sinon.spy();
+      smp.write = jest.fn();
       smp._pcnf = Buffer.from([0]);
       smp.on('stk', callback);
       smp.on('fail', failCallback);
       smp.handlePairingRandom(data);
 
-      assert.calledOnceWithExactly(smp.write, Buffer.from([4, 3]));
-      assert.notCalled(callback);
-      assert.calledOnceWithExactly(failCallback);
+      expect(smp.write).toHaveBeenCalledWith(Buffer.from([4, 3]));
+      expect(callback).not.toHaveBeenCalled();
+      expect(failCallback).toHaveBeenCalled();
     });
   });
 
-  it('should emit fail on handlePairingFailed', () => {
-    const callback = sinon.spy();
+  test('should emit fail on handlePairingFailed', () => {
+    const callback = jest.fn();
     smp.on('fail', callback);
     smp.handlePairingFailed();
-    assert.calledOnceWithExactly(callback);
+    expect(callback).toHaveBeenCalled();
   });
 
-  it('should emit ltk on handleEncryptInfo', () => {
-    const callback = sinon.spy();
+  test('should emit ltk on handleEncryptInfo', () => {
+    const callback = jest.fn();
     smp.on('ltk', callback);
     smp.handleEncryptInfo(Buffer.from([0x02, 0x03, 0x04]));
-    assert.calledOnceWithExactly(callback, Buffer.from([0x03, 0x04]));
+    expect(callback).toHaveBeenCalledWith(Buffer.from([0x03, 0x04]));
   });
 
-  it('should emit ltk on handleMasterIdent', () => {
-    const callback = sinon.spy();
+  test('should emit masterIdent on handleMasterIdent', () => {
+    const callback = jest.fn();
     smp.on('masterIdent', callback);
     smp.handleMasterIdent(Buffer.from([0x02, 0x03, 0x04, 0x05, 0x06]));
-    assert.calledOnceWithExactly(callback, Buffer.from([0x03, 0x04]), Buffer.from([0x05, 0x06]));
+    expect(callback).toHaveBeenCalledWith(Buffer.from([0x03, 0x04]), Buffer.from([0x05, 0x06]));
   });
 
-  it('should write on aclStream', () => {
+  test('should write on aclStream', () => {
     smp.write('data');
-    assert.calledOnceWithExactly(aclStream.write, 6, 'data');
+    expect(aclStream.write).toHaveBeenCalledWith(6, 'data');
   });
 });

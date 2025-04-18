@@ -1,40 +1,65 @@
 const noble = require('../index');
-const direct = require('debug')('connection/direct');
-const scan = require('debug')('connection/scan');
 
-function sleep (ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+async function main () {
+  try {
+    // Wait for the BLE adapter to be ready
+    console.log('Waiting for powered on state');
+    await noble.waitForPoweredOnAsync();
+    console.log('Powered on');
 
-async function run () {
-  noble.on('stateChange', async function (state) {
-    if (state === 'poweredOn') {
-      try {
-        direct('connecting');
-        // const uuid = 'f1:36:1c:ab:94:cc'.split(':').join(''); // HCI Address UUID
-        const uuid = '2561b846d6f83ee27580bca8ed6ec079'; // MacOS UUID
-        const peripheral = await noble.connectAsync(uuid);
-        direct(`connected ${peripheral.uuid}`);
-        await peripheral.disconnectAsync();
-        direct('disconnected');
-        console.log('sleeping for 2000ms');
-        await sleep(2000);
-        scan('connecting by scan');
-        await noble.startScanningAsync();
-        noble.on('discover', async peripheral => {
-          if (peripheral.uuid === uuid) {
-            await noble.stopScanningAsync();
-            await peripheral.connectAsync();
-            scan(`connected ${peripheral.uuid}`);
-            await peripheral.disconnectAsync();
-            scan('disconnected');
-          }
-        });
-      } catch (error) {
-        console.log(error);
-      }
+    // First attempt - direct connection
+    const uuid = '2561b846d6f83ee27580bca8ed6ec079'; // MacOS UUID
+    console.log('Attempting direct connection to:', uuid);
+    
+    try {
+      const peripheral = await noble.connectAsync(uuid);
+      console.log('Direct connection successful to:', peripheral.id);
+      await peripheral.disconnectAsync();
+      console.log('Disconnected from direct connection');
+    } catch (error) {
+      console.log('Direct connection failed:', error.message);
     }
-  });
+
+    // Wait before trying scan method
+    console.log('Waiting 2 seconds before scan attempt...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Second attempt - scan and connect
+    console.log('Starting scan for device');
+    await noble.startScanningAsync();
+
+    noble.on('discover', async (peripheral) => {
+      if (peripheral.id === uuid) {
+        console.log('Found device in scan:', peripheral.id);
+        await noble.stopScanningAsync();
+        
+        try {
+          await peripheral.connectAsync();
+          console.log('Scan connection successful to:', peripheral.id);
+          await peripheral.disconnectAsync();
+          console.log('Disconnected from scan connection');
+        } catch (error) {
+          console.log('Scan connection failed:', error.message);
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Main error:', error);
+  }
 }
 
-run();
+// Handle process termination
+const cleanup = async () => {
+  console.log('Caught interrupt signal');
+  await noble.stopScanningAsync();
+  noble.stop();
+  console.log('noble stopped');
+};
+
+process.on('SIGINT', cleanup);
+process.on('SIGQUIT', cleanup);
+process.on('SIGTERM', cleanup);
+
+// Start the application
+main().catch(console.error);

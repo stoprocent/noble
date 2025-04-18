@@ -16,7 +16,7 @@ using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDeviceSer
 #include <string>
 #include <optional>
 
-#include "peripheral.h"
+#include "Peripheral.h"
 #include "winrt_guid.h"
 
 class CachedCharacteristic

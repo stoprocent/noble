@@ -1,1 +1,4 @@
-module.exports = require('./with-custom-binding')();
+const withBindings = require('./lib/resolve-bindings');
+
+module.exports = withBindings();
+module.exports.withBindings = withBindings;

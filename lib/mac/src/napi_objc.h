@@ -1,6 +1,7 @@
 #pragma once
 
 #include <napi.h>
+
 #import <Foundation/Foundation.h>
 
 NSArray* getUuidArray(const Napi::Value& value);

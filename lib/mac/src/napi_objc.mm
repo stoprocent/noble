@@ -1,9 +1,3 @@
-//
-//  napi_objc.mm
-//  noble-mac-native
-//
-//  Created by Georg Vienna on 30.08.18.
-//
 #include "napi_objc.h"
 
 NSString* napiToUuidString(Napi::String string) {

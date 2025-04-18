@@ -1,22 +1,37 @@
 const noble = require('../');
 
-const directConnect = process.argv[2].toLowerCase();
-const peripheralIdOrAddress = process.argv[3].toLowerCase();
-const addressType = process.argv[4].toLowerCase() || 'random';
+let directConnect = '0';
+let peripheralIdOrAddress = 'cd:6b:86:03:39:40'.toLowerCase();
+let addressType = 'random';
+
+try {
+  directConnect = process.argv[2].toLowerCase() || '0';
+  peripheralIdOrAddress = process.argv[3].toLowerCase() || 'cd:6b:86:03:39:40';
+  addressType = process.argv[4].toLowerCase() || 'random';
+} catch (error) {
+  console.error('Error:', error);
+}
 
 const starTime = Date.now();
 
+let peripheral;
 async function main () {
   try {
-    await noble.waitForPoweredOn();
+    await noble.waitForPoweredOnAsync();
+
+    // Cancel the connection after 5 seconds if it is still connecting
+    setTimeout(() => {
+      noble.cancelConnect(peripheralIdOrAddress);
+    }, 5000);
+
     if (directConnect === '1') {
-      const peripheral = await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''), { addressType });
+      peripheral = await noble.connectAsync(peripheralIdOrAddress, { addressType });
       await explore(peripheral);
     } else {
-      await noble.startScanningAsync();
+      await noble.startScanningAsync([], false);
     }
   } catch (error) {
-    console.error('Error:', error);
+    throw new Error('Error:', error);
   }
 }
 
@@ -28,6 +43,7 @@ noble.on('discover', async (peripheral) => {
     await noble.stopScanningAsync();
     
     console.log(`Peripheral with ID ${peripheral.id} found`);
+
     const advertisement = peripheral.advertisement;
 
     const localName = advertisement.localName;
@@ -70,13 +86,18 @@ noble.on('discover', async (peripheral) => {
 const explore = async (peripheral) => {
   console.log('Services and characteristics:');
 
-  peripheral.on('disconnect', () => {
-    process.exit(0);
+  peripheral.on('disconnect', (reason) => {
+    console.log('Disconnected', reason);
+    noble.stop();
+    console.log('noble stopped');
   });
 
   if (peripheral.state !== 'connected') {
     await peripheral.connectAsync();
   }
+
+  const rssi = await peripheral.updateRssiAsync();
+  console.log('RSSI', rssi);
 
   const services = await peripheral.discoverServicesAsync([]);
 
@@ -136,19 +157,16 @@ const explore = async (peripheral) => {
 
 };
 
-process.on('SIGINT', function () {
+// Handle process termination
+const cleanup = async () => {
   console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+  await noble.stopScanningAsync();
+  noble.stop();
+  console.log('noble stopped');
+};
 
-process.on('SIGQUIT', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
-
-process.on('SIGTERM', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+process.on('SIGINT', cleanup);
+process.on('SIGQUIT', cleanup);
+process.on('SIGTERM', cleanup);
 
 main();

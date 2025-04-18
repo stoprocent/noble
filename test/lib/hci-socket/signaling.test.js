@@ -1,94 +1,91 @@
-const should = require('should');
-const sinon = require('sinon');
-const proxyquire = require('proxyquire').noCallThru();
+// Mock the os module
+jest.mock('os', () => ({
+  platform: jest.fn()
+}));
 
-const fakeOs = {};
-const { assert } = sinon;
-const Signaling = proxyquire('../../../lib/hci-socket/signaling', { os: fakeOs });
+const os = require('os');
+const Signaling = require('../../../lib/hci-socket/signaling');
 
 describe('hci-socket signaling', () => {
   let signaling;
-
+  let aclStream;
   const handle = 'handle';
-  const aclStream = {
-    on: sinon.spy(),
-    removeListener: sinon.spy(),
-    write: sinon.spy()
-  };
 
   beforeEach(() => {
+    // Reset mocks
+    jest.clearAllMocks();
+    
+    // Setup aclStream mock
+    aclStream = {
+      on: jest.fn(),
+      removeListener: jest.fn(),
+      write: jest.fn()
+    };
+
     signaling = new Signaling(handle, aclStream);
   });
 
-  afterEach(() => {
-    sinon.reset();
-  });
+  test('construct', () => {
+    expect(aclStream.on).toHaveBeenCalledTimes(2);
+    expect(aclStream.on).toHaveBeenCalledWith('data', expect.any(Function));
+    expect(aclStream.on).toHaveBeenCalledWith('end', expect.any(Function));
 
-  it('construct', () => {
-    assert.callCount(aclStream.on, 2);
-    assert.calledWithMatch(aclStream.on, 'data', sinon.match.func);
-    assert.calledWithMatch(aclStream.on, 'end', sinon.match.func);
-
-    should(signaling._handle).equal(handle);
-    should(signaling._aclStream).equal(aclStream);
+    expect(signaling._handle).toBe(handle);
+    expect(signaling._aclStream).toBe(aclStream);
   });
 
   describe('onAclStreamData', () => {
     beforeEach(() => {
-      signaling.processConnectionParameterUpdateRequest = sinon.spy();
+      signaling.processConnectionParameterUpdateRequest = jest.fn();
     });
 
-    afterEach(() => {
-      sinon.reset();
-    });
-
-    it('should do nothing as not SIGNALING_CID', () => {
+    test('should do nothing as not SIGNALING_CID', () => {
       signaling.onAclStreamData(0, 'data');
-      assert.notCalled(signaling.processConnectionParameterUpdateRequest);
+      expect(signaling.processConnectionParameterUpdateRequest).not.toHaveBeenCalled();
     });
 
-    it('should do nothing as not CONNECTION_PARAMETER_UPDATE_REQUEST', () => {
+    test('should do nothing as not CONNECTION_PARAMETER_UPDATE_REQUEST', () => {
       const data = Buffer.from([0, 1, 2, 3, 4]);
       signaling.onAclStreamData(5, data);
-      assert.notCalled(signaling.processConnectionParameterUpdateRequest);
+      expect(signaling.processConnectionParameterUpdateRequest).not.toHaveBeenCalled();
     });
 
-    it('should do nothing processConnectionParameterUpdateRequest', () => {
+    test('should call processConnectionParameterUpdateRequest', () => {
       const data = Buffer.from([18, 1, 2, 3, 4, 5]);
       signaling.onAclStreamData(5, data);
-      assert.calledOnceWithExactly(signaling.processConnectionParameterUpdateRequest, 1, Buffer.from([4, 5]));
+      expect(signaling.processConnectionParameterUpdateRequest).toHaveBeenCalledWith(1, Buffer.from([4, 5]));
     });
   });
 
-  it('onAclStreamEnd', () => {
+  test('onAclStreamEnd', () => {
     signaling.onAclStreamEnd();
 
-    assert.callCount(aclStream.removeListener, 2);
-    assert.calledWithMatch(aclStream.removeListener, 'data', sinon.match.func);
-    assert.calledWithMatch(aclStream.removeListener, 'end', sinon.match.func);
+    expect(aclStream.removeListener).toHaveBeenCalledTimes(2);
+    expect(aclStream.removeListener).toHaveBeenCalledWith('data', expect.any(Function));
+    expect(aclStream.removeListener).toHaveBeenCalledWith('end', expect.any(Function));
   });
 
   describe('processConnectionParameterUpdateRequest', () => {
-    it('should not write on linux', () => {
-      fakeOs.platform = sinon.fake.returns('linux');
-      const callback = sinon.spy();
+    test('should not write on linux', () => {
+      os.platform.mockReturnValue('linux');
+      const callback = jest.fn();
 
       signaling.on('connectionParameterUpdateRequest', callback);
       signaling.processConnectionParameterUpdateRequest(1, Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]));
 
-      assert.notCalled(callback);
-      assert.notCalled(aclStream.write);
+      expect(callback).not.toHaveBeenCalled();
+      expect(aclStream.write).not.toHaveBeenCalled();
     });
 
-    it('should write on !linux', () => {
-      fakeOs.platform = sinon.fake.returns('!linux');
-      const callback = sinon.spy();
+    test('should write on !linux', () => {
+      os.platform.mockReturnValue('!linux');
+      const callback = jest.fn();
 
       signaling.on('connectionParameterUpdateRequest', callback);
       signaling.processConnectionParameterUpdateRequest(1, Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]));
 
-      assert.calledOnceWithExactly(callback, handle, 1.25, 2.5, 3, 40);
-      assert.calledOnceWithExactly(aclStream.write, 5, Buffer.from([0x13, 0x01, 0x02, 0x00, 0x00, 0x00]));
+      expect(callback).toHaveBeenCalledWith(handle, 1.25, 2.5, 3, 40);
+      expect(aclStream.write).toHaveBeenCalledWith(5, Buffer.from([0x13, 0x01, 0x02, 0x00, 0x00, 0x00]));
     });
   });
 });

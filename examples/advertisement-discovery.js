@@ -1,65 +1,74 @@
 const noble = require('../index');
 
-noble.on('stateChange', function (state) {
-  if (state === 'poweredOn') {
-    noble.startScanning([], false);
-  } else {
-    noble.stopScanning();
-  }
-});
+async function handleDiscovery (peripheral) {
+  console.log(`\n${new Date()}`);
+  console.log(
+    `Peripheral discovered (${peripheral.id}):
+    - Address: ${peripheral.address} (${peripheral.addressType})
+    - Connectable: ${peripheral.connectable}
+    - Scannable: ${peripheral.scannable}
+    - RSSI: ${peripheral.rssi}`
+  );
 
-noble.on('discover', function (peripheral) {
-  console.log(`${new Date()}`);
-  console.log(
-    `Peripheral discovered (${peripheral.id} with address <${peripheral.address}, ${peripheral.addressType}>, connectable: ${peripheral.connectable}, scannable: ${peripheral.scannable}, RSSI ${peripheral.rssi}:`
-  );
-  console.log('\thello my local name is:');
-  console.log(`\t\t${peripheral.advertisement.localName}`);
-  console.log(
-    '\tcan I interest you in any of the following advertised services:'
-  );
-  console.log(`\t\t${JSON.stringify(peripheral.advertisement.serviceUuids)}`);
+  // Local Name
+  if (peripheral.advertisement.localName) {
+    console.log(`Local Name: ${peripheral.advertisement.localName}`);
+  }
+
+  // Service UUIDs
+  if (peripheral.advertisement.serviceUuids.length) {
+    console.log('Advertised Services:');
+    console.log(`    ${peripheral.advertisement.serviceUuids.join(', ')}`);
+  }
+
+  // Service Data
   const serviceData = peripheral.advertisement.serviceData;
-
   if (serviceData && serviceData.length) {
-    console.log('\there is my service data:');
-    for (const i in serviceData) {
-      console.log(
-        `\t\t${JSON.stringify(serviceData[i].uuid)}: ${JSON.stringify(
-          serviceData[i].data.toString('hex')
-        )}`
-      );
-    }
+    console.log('Service Data:');
+    serviceData.forEach(data => {
+      console.log(`    ${data.uuid}: ${data.data.toString('hex')}`);
+    });
   }
 
+  // Manufacturer Data
   if (peripheral.advertisement.manufacturerData) {
-    console.log('\there is my manufacturer data:');
-    console.log(
-      `\t\t${JSON.stringify(
-        peripheral.advertisement.manufacturerData.toString('hex')
-      )}`
-    );
+    console.log('Manufacturer Data:');
+    console.log(`    ${peripheral.advertisement.manufacturerData.toString('hex')}`);
   }
 
+  // TX Power Level
   if (peripheral.advertisement.txPowerLevel !== undefined) {
-    console.log('\tmy TX power level is:');
-    console.log(`\t\t${peripheral.advertisement.txPowerLevel}`);
+    console.log(`TX Power Level: ${peripheral.advertisement.txPowerLevel}`);
   }
+}
 
-  console.log();
-});
+async function main () {
+  try {
+    console.log('Waiting for Bluetooth adapter...');
+    await noble.waitForPoweredOnAsync();
+    console.log('Bluetooth adapter ready');
 
-process.on('SIGINT', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+    console.log('Starting scan for all devices...');
+    await noble.startScanningAsync([], false);
+    
+    noble.on('discover', handleDiscovery);
+    
+  } catch (error) {
+    throw new Error('Error:', error);
+  }
+}
 
-process.on('SIGQUIT', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+// Handle process termination
+const cleanup = async () => {
+  console.log('\nCleaning up...');
+  await noble.stopScanningAsync();
+  noble.stop();
+  console.log('noble stopped');
+};
 
-process.on('SIGTERM', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+process.on('SIGINT', cleanup);
+process.on('SIGQUIT', cleanup);
+process.on('SIGTERM', cleanup);
+
+// Start the application
+main().catch(console.error);

@@ -1,9 +1,3 @@
-//
-//  napi_objc.mm
-//  noble-mac-native
-//
-//  Created by Georg Vienna on 30.08.18.
-//
 #include "napi_winrt.h"
 
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
@@ -21,7 +15,7 @@ winrt::guid napiToUuid(Napi::String string)
         str.insert(18, "-");
         str.insert(23, "-");
     }
-    if (str.size() == 4)
+    if (str.size() == 4 || str.size() == 8)
     {
         int id = std::stoi(str, 0, 16);
         return BluetoothUuidHelper::FromShortId(id);
