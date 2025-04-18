@@ -56,9 +56,11 @@ npm install @stoprocent/noble
 ### TypeScript (Recommended)
 
 ```typescript
+// Auto-select based on platform
 import noble from '@stoprocent/noble';
 // or
 import { withBindings } from '@stoprocent/noble';
+// Auto-select based on platform
 const noble = withBindings('default'); // 'hci', 'win', 'mac'
 ```
 
@@ -68,7 +70,7 @@ For more detailed examples and API documentation, see [Binding Types](#Binding-T
 
 ```javascript
 const noble = require('@stoprocent/noble');
-// or
+// or 
 const { withBindings } = require('@stoprocent/noble');
 const noble = withBindings('default'); // 'hci', 'win', 'mac'
 ```
@@ -83,11 +85,29 @@ const noble = withBindings('default'); // 'hci', 'win', 'mac'
 ```typescript
 import noble from '@stoprocent/noble';
 
-await noble.waitForPoweredOnAsync();
-await noble.startScanningAsync();
-
-for await (const peripheral of noble.discoverAsync()) {
-  console.log(peripheral);
+// Discover peripherals as an async generator
+try {
+  // Wait for Adapter poweredOn state
+  await noble.waitForPoweredOnAsync();
+  // Start scanning first
+  await noble.startScanningAsync();
+  
+  // Use the async generator with proper boundaries
+  for await (const peripheral of noble.discoverAsync()) {
+    console.log(`Found device: ${peripheral.advertisement.localName || 'Unknown'}`);
+    // Process the peripheral as needed
+    
+    // Optional: stop scanning when a specific device is found
+    if (peripheral.advertisement.localName === 'MyDevice') {
+      break;
+    }
+  }
+  
+  // Clean up after discovery
+  await noble.stopScanningAsync();
+} catch (error) {
+  console.error('Discovery error:', error);
+  await noble.stopScanningAsync();
 }
 ```
 
@@ -98,16 +118,24 @@ Alternatively, you can still use the legacy event-based API:
 ``` javascript
 const noble = require('@stoprocent/noble');
 
+// State change event is emitted when adapter state changes
 noble.on('stateChange', function (state) {
   if (state === 'poweredOn') {
+    // Start scanning when adapter is ready
     noble.startScanning();
   } else {
+    // Stop scanning if adapter becomes unavailable
     noble.stopScanning();
   }
 });
 
+// Discover event is emitted when a peripheral is found
 noble.on('discover', peripheral => {
   console.log(peripheral);
+  // From here you can work with the peripheral:
+  // - Connect to it: peripheral.connect()
+  // - Check advertisement data: peripheral.advertisement
+  // - See signal strength: peripheral.rssi
 });
 ```
 
@@ -379,9 +407,9 @@ await descriptor.writeValueAsync(data);
 
 Please refer to [https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os](https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os)
 
-__NOTE:__ Environmental variables are no longer required to force HCI driver selection. The driver type can be specified directly in the `withBindings()` call as shown in Example 1 above.
+__NOTE:__ While environmental variables are still supported for backward compatibility, the recommended approach is to specify driver options directly in the `withBindings()` call as shown below:
 
-##### Example 1 (UART port specified in `bindParams`)
+##### Recommended Approach (UART port specified in `bindParams`)
 
 ```typescript
 import { withBindings } from '@stoprocent/noble';
@@ -396,7 +424,7 @@ const noble = withBindings('hci', {
 });
 ```
 
-##### Example 2 (UART port specified as environmental variable)
+##### Legacy Approach (Using environmental variables - not recommended for new implementations)
 
 ```bash
 $ export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/tty...
@@ -564,3 +592,16 @@ By default, noble waits for both the advertisement data and scan response data f
 ```sh
 sudo NOBLE_REPORT_ALL_HCI_EVENTS=1 node <your file>.js
 ```
+
+## Environment Variables
+
+The following environment variables can configure noble's behavior:
+
+| Variable | Purpose | Default | Example |
+|----------|---------|---------|---------|
+| NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
+| NOBLE_REPORT_ALL_HCI_EVENTS | Report HCI events without waiting for scan response | false | `export NOBLE_REPORT_ALL_HCI_EVENTS=1` |
+| BLUETOOTH_HCI_SOCKET_UART_PORT | UART port for HCI communication | none | `export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/ttyUSB0` |
+| BLUETOOTH_HCI_SOCKET_UART_BAUDRATE | UART baudrate | 1000000 | `export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000` |
+
+**Note:** The preferred method for configuration is now using the `withBindings()` API rather than environment variables.
