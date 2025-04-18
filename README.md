@@ -8,21 +8,38 @@ A Node.js BLE (Bluetooth Low Energy) central module.
 
 Want to implement a peripheral? Check out [@stoprocent/bleno](https://github.com/stoprocent/bleno).
 
+__NOTE__: Currently, running both noble (central) and bleno (peripheral) together only works with macOS bindings or when using separate HCI/UART dongles. Support for running both on a single HCI adapter (e.g., on Linux systems) will be added in future releases.
+
 ## About This Fork
 
 This fork of `noble` was created to introduce several key improvements and new features:
 
-1. **HCI UART Support**: This version enables HCI UART communication through the `@stoprocent/node-bluetooth-hci-socket` dependency, allowing more flexible use of Bluetooth devices across platforms.
+1. **Flexible Bluetooth Driver Selection**:
+   - This library enables flexible selection of Bluetooth drivers through the new `withBindings()` API. Use native platform bindings (Mac, Windows) or HCI bindings with UART/serial support for hardware dongles, allowing Bluetooth connectivity across various platforms and hardware setups.
    
-2. **macOS Native Bindings Fix**: I have fixed the native bindings for macOS, ensuring better compatibility and performance on Apple devices.
+2. **Native Bindings Improvements**: 
+   - Fixed and optimized native bindings for macOS, ensuring better compatibility and performance on Apple devices
+   - Overhauled Windows native bindings with support for `Service Data` from advertisements
+   - Aligned behavior across different bindings (macOS, Windows, HCI) for consistent behavior 
 
-3. **Windows Native Bindings Fix**: I have fixed the native bindings for Windows, adding support for `Service Data` from advertisements.
+3. **Modern JavaScript Support**:
+   - Added full Promise-based API with async/await support throughout the library
+   - Implemented async iterators for device discovery with `for await...of` syntax
+   - Refactored codebase to use modern JavaScript patterns and best practices
 
-4. **New Features**: 
-  - A `setAddress(...)` function has been added, allowing users to set the MAC address of the central device. 
-  - A `connect(...)/connectAsync(...)` function has been added, allowing users to connect directly to specific device by address/identifier without a need to prior scan. 
-  - A `waitForPoweredOn(...)` function to wait for the adapter to be powered on in await/async functions.
-  - Additionally, I plan to add raw L2CAP channel support, enhancing low-level Bluetooth communication capabilities.
+4. **Enhanced Testing and Reliability**:
+   - Migrated tests to Jest for improved coverage and reliability
+   - Added comprehensive TypeScript type definitions
+   - Fixed numerous edge cases and stability issues
+
+5. **New Features**: 
+   - A `setAddress(...)` function to set the MAC address of the central device
+   - Direct device connection with `connect(...)/connectAsync(...)` without requiring a prior scan
+   - `waitForPoweredOnAsync(...)` function to simplify async workflows
+   - Support for multiple adapter configurations through the new `withBindings()` API
+   - Extended debugging capabilities and error handling
+   - Additionally, I plan to add raw L2CAP channel support, enhancing low-level Bluetooth communication capabilities
+
 
 If you appreciate these enhancements and the continued development of this project, please consider supporting my work. 
 
@@ -42,8 +59,10 @@ npm install @stoprocent/noble
 import noble from '@stoprocent/noble';
 // or
 import { withBindings } from '@stoprocent/noble';
-const noble = withBindings('default');
+const noble = withBindings('default'); // 'hci', 'win', 'mac'
 ```
+
+For more detailed examples and API documentation, see [Binding Types](#Binding-Types) below.
 
 ### JavaScript
 
@@ -51,42 +70,56 @@ const noble = withBindings('default');
 const noble = require('@stoprocent/noble');
 // or
 const { withBindings } = require('@stoprocent/noble');
-const noble = withBindings('default');
+const noble = withBindings('default'); // 'hci', 'win', 'mac'
 ```
 
-For more detailed examples and API documentation, see [Binding Types](#Binding-Types) below.
 
 ## Quick Start Example
 
 ### TypeScript Example (Modern Async/Await)
 
-#### Basic Connection and Service Discovery
+#### Basic Scan
 
 ```typescript
-import { withBindings } from '@stoprocent/noble';
+import noble from '@stoprocent/noble';
 
-async function connectToDevice(targetAddress: string) {
-  // Initialize noble with default bindings
-  const noble = withBindings('default');
-  
-  // Wait for Bluetooth adapter to be ready
-  await noble.waitForPoweredOnAsync();
-  
-  // Scan for devices
-  await noble.startScanningAsync([], false);
-  
-  // Option 1: Using async generator to discover devices
-  for await (const peripheral of noble.discoverAsync()) {
-    if (peripheral.address === targetAddress) {
-      await noble.stopScanningAsync();
-      await peripheral.connectAsync();
-      return peripheral;
-    }
-  }
-  
-  // Option 2: Direct connection without scanning
-  // return await noble.connectAsync(targetAddress);
+await noble.waitForPoweredOnAsync();
+await noble.startScanningAsync();
+
+for await (const peripheral of noble.discoverAsync()) {
+  console.log(peripheral);
 }
+```
+
+For a more detailed example, please check out [examples/peripheral-explorer.ts](examples/peripheral-explorer.ts)
+
+Alternatively, you can still use the legacy event-based API:
+
+``` javascript
+const noble = require('@stoprocent/noble');
+
+noble.on('stateChange', function (state) {
+  if (state === 'poweredOn') {
+    noble.startScanning();
+  } else {
+    noble.stopScanning();
+  }
+});
+
+noble.on('discover', peripheral => {
+  console.log(peripheral);
+});
+```
+
+#### Connecting to the device
+
+``` typescript
+// Stop scan
+await noble.stopScanningAsync();
+// Connect
+await peripheral.connectAsync();
+// Discover
+const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
 ```
 
 #### Working with Services and Characteristics
@@ -249,7 +282,7 @@ for await (const peripheral of noble.discoverAsync()) {
 // Connect directly to a peripheral by ID or address
 const peripheral = await noble.connectAsync(idOrAddress, options?);
 
-// Set adapter address (HCI only)
+// Set adapter address (HCI only on supported devices)
 noble.setAddress('00:11:22:33:44:55');
 
 // Reset adapter
@@ -346,7 +379,24 @@ await descriptor.writeValueAsync(data);
 
 Please refer to [https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os](https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os)
 
-##### Example 1 (UART port specified as environmental variable)
+__NOTE:__ Environmental variables are no longer required to force HCI driver selection. The driver type can be specified directly in the `withBindings()` call as shown in Example 1 above.
+
+##### Example 1 (UART port specified in `bindParams`)
+
+```typescript
+import { withBindings } from '@stoprocent/noble';
+const noble = withBindings('hci', { 
+  hciDriver: 'uart',
+  bindParams: {
+    uart: {
+      port: '/dev/ttyUSB0',
+      baudRate: 1000000
+    }
+  }
+});
+```
+
+##### Example 2 (UART port specified as environmental variable)
 
 ```bash
 $ export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/tty...
@@ -358,26 +408,6 @@ __NOTE:__ `BLUETOOTH_HCI_SOCKET_UART_BAUDRATE` defaults to `1000000` so only nee
 ```typescript
 import noble from '@stoprocent/noble';
 ```
-
-##### Example 2 (UART port specified in `bindParams`)
-
-```bash
-$ export BLUETOOTH_HCI_SOCKET_FORCE_UART=1
-```
-
-```typescript
-import { withBindings } from '@stoprocent/noble';
-const noble = withBindings('hci', { 
-  bindParams: { 
-    uart: { 
-      port: '/dev/tty...', 
-      baudRate: 1000000
-    } 
-  } 
-});
-```
-
-__NOTE:__ There is a [UART code example](examples/uart-bind-params.js) in the `/examples` directory.
 
 #### OS X
 
@@ -465,34 +495,6 @@ See [@don](https://github.com/don)'s setup guide on [Bluetooth LE with Node.js a
 
 Make sure your container runs with `--network=host` options and all specific environment prerequisites are verified.
 
-### Installing and using the package
-
-```sh
-npm install @stoprocent/noble
-```
-
-In Windows OS add your custom hci-usb dongle to the process env
-```sh
-set BLUETOOTH_HCI_SOCKET_USB_VID=xxx
-set BLUETOOTH_HCI_SOCKET_USB_PID=xxx
-```
-
-```typescript
-// TypeScript
-import noble from '@stoprocent/noble';
-// or with custom bindings
-import { withBindings } from '@stoprocent/noble';
-const noble = withBindings('default');
-
-// JavaScript
-const noble = require('@stoprocent/noble');
-// or with custom bindings
-const { withBindings } = require('@stoprocent/noble');
-const noble = withBindings('default');
-```
-
-
-
 ### Running without root/sudo (Linux-specific)
 
 Run the following command:
@@ -513,7 +515,23 @@ It can be installed the following way:
 
 `hci0` is used by default.
 
-To override, set the `NOBLE_HCI_DEVICE_ID` environment variable to the interface number.
+You can specify which HCI adapter to use in two ways:
+
+#### 1. Using `withBindings` (Recommended)
+
+```typescript
+import { withBindings } from '@stoprocent/noble';
+
+// Specify HCI adapter in code
+const noble = withBindings('hci', { 
+  hciDriver: 'native',
+  deviceId: 1 // Using hci1
+});
+```
+
+#### 2. Using environment variable
+
+To override using environment variables, set the `NOBLE_HCI_DEVICE_ID` environment variable to the interface number.
 
 For example, to specify `hci1`:
 
@@ -523,18 +541,21 @@ sudo NOBLE_HCI_DEVICE_ID=1 node <your file>.js
 
 If you are using multiple HCI devices in one setup you can run two instances of noble with different binding configurations by initializing them seperatly in code:
 
-```
-const HCIBindings = require('@stoprocent/noble/lib/hci-socket/bindings');
-const Noble = require('@stoprocent/noble/lib/noble');
+``` typescript
+import { withBindings } from '@stoprocent/noble';
 
-const params = {
-  deviceId: 0,
-  userChannel: true,
-  extended: false //ble5 extended features
-};
+// Create two noble instances with different HCI adapters
+const nobleAdapter0 = withBindings('hci', { 
+  hciDriver: 'native',
+  deviceId: 0 // Using hci0
+});
 
-const noble = new Noble(new HCIBindings(params));
+const nobleAdapter1 = withBindings('hci', { 
+  hciDriver: 'native',
+  deviceId: 1 // Using hci1
+});
 ```
+
 
 ### Reporting all HCI events (Linux-specific)
 
@@ -543,46 +564,3 @@ By default, noble waits for both the advertisement data and scan response data f
 ```sh
 sudo NOBLE_REPORT_ALL_HCI_EVENTS=1 node <your file>.js
 ```
-
-### bleno compatibility (Linux-specific)
-
-By default, noble will respond with an error whenever a GATT request message is received. If your intention is to use bleno in tandem with noble, the `NOBLE_MULTI_ROLE` environment variable can be used to bypass this behaviour.
-
-__Note:__ this requires a Bluetooth 4.1 adapter.
-
-```sh
-sudo NOBLE_MULTI_ROLE=1 node <your file>.js
-```
-
-## Common problems
-
-### Maximum simultaneous connections
-
-This limit is imposed by the Bluetooth adapter hardware as well as its firmware.
-
-| Platform                          |                       |
-| :-------------------------------- | --------------------- |
-| OS X 10.11 (El Capitan)           | 6                     |
-| Linux/Windows - Adapter-dependent | 5 (CSR based adapter) |
-
-### Sandboxed terminal
-
-On newer versions of OSX, the terminal app is sandboxed to not allow bluetooth connections by default. If you run a script that tries to access it, you will get an `Abort trap: 6` error.
-
-To enable bluetooth, go to "System Preferences" —> "Security & Privacy" —> "Bluetooth" -> Add your terminal into allowed apps.
-
-### Adapter-specific known issues
-
-Some BLE adapters cannot connect to a peripheral while they are scanning (examples below). You will get the following messages when trying to connect:
-
-Sena UD-100 (Cambridge Silicon Radio, Ltd Bluetooth Dongle (HCI mode)): `Error: Command disallowed`
-
-Intel Dual Band Wireless-AC 7260 (Intel Corporation Wireless 7260 (rev 73)): `Error: Connection Rejected due to Limited Resources (0xd)`
-
-You need to stop scanning before trying to connect in order to solve this issue.
-
-## Useful links
-
- * [Bluetooth Development Portal](http://developer.bluetooth.org)
-   * [GATT Specifications](https://www.bluetooth.com/specifications/gatt/)
- * [Bluetooth: ATT and GATT](http://epx.com.br/artigos/bluetooth_gatt.php)
