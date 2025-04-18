@@ -650,4 +650,144 @@ describe('peripheral', () => {
       expect(mockNoble.writeHandle).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('async commands with disconnect handling', () => {
+    // Setup a reusable helper to manage the original and mocked _withDisconnectHandler
+    let originalWithDisconnectHandler;
+    
+    const setupDisconnectMock = (simulateDisconnect = true, disconnectDelay = 10) => {
+      // Save the original implementation
+      originalWithDisconnectHandler = mockNoble._withDisconnectHandler;
+      
+      // Create the mock implementation
+      mockNoble._withDisconnectHandler = jest.fn((id, operation) => {
+        return new Promise((resolve, reject) => {
+          // Start the operation
+          const operationPromise = operation();
+          
+          if (simulateDisconnect) {
+            // Simulate a disconnect by rejecting with a disconnect error
+            setTimeout(() => {
+              reject(new Error('Peripheral disconnected'));
+            }, disconnectDelay);
+          }
+          
+          return operationPromise;
+        });
+      });
+    };
+    
+    const restoreDisconnectMock = () => {
+      // Restore the original implementation
+      mockNoble._withDisconnectHandler = originalWithDisconnectHandler;
+    };
+    
+    afterEach(() => {
+      // Always restore after each test
+      restoreDisconnectMock();
+    });
+    
+    test('discoverServicesAsync should handle disconnect during operation', async () => {
+      setupDisconnectMock();
+      
+      const promise = peripheral.discoverServicesAsync();
+      
+      await expect(promise).rejects.toEqual(expect.objectContaining({
+        message: 'Peripheral disconnected'
+      }));
+    });
+    
+    test('updateRssiAsync should handle disconnect during operation', async () => {
+      setupDisconnectMock();
+      
+      const promise = peripheral.updateRssiAsync();
+      
+      await expect(promise).rejects.toEqual(expect.objectContaining({
+        message: 'Peripheral disconnected'
+      }));
+    });
+    
+    test('readHandleAsync should handle disconnect during operation', async () => {
+      setupDisconnectMock();
+      
+      const promise = peripheral.readHandleAsync(mockHandle);
+      
+      await expect(promise).rejects.toEqual(expect.objectContaining({
+        message: 'Peripheral disconnected'
+      }));
+    });
+    
+    test('writeHandleAsync should handle disconnect during operation', async () => {
+      setupDisconnectMock();
+      
+      const mockData = Buffer.alloc(0);
+      const promise = peripheral.writeHandleAsync(mockHandle, mockData, false);
+      
+      await expect(promise).rejects.toEqual(expect.objectContaining({
+        message: 'Peripheral disconnected'
+      }));
+    });
+    
+    test('chain of async operations should all fail on disconnect', async () => {
+      // We'll run without disconnect initially
+      setupDisconnectMock(false);
+      
+      // Setup mock responses for service discovery
+      const mockCharacteristic = { uuid: '1' };
+      const mockService = {
+        uuid: '1',
+        discoverCharacteristics: jest.fn((charUuids, callback) => {
+          callback(null, [mockCharacteristic]);
+        })
+      };
+      
+      peripheral.discoverServices = jest.fn((uuids, callback) => {
+        callback(null, [mockService]);
+      });
+      
+      // Start a chain of operations
+      const runOperations = async () => {
+
+        setTimeout(() => peripheral.emit('connect'), 20);
+
+        // First operation succeeds
+        await peripheral.connectAsync();
+        
+        // Enable disconnection before second operation
+        setupDisconnectMock(true, 5);
+        
+        // This should fail with disconnect
+        await peripheral.discoverAllServicesAndCharacteristics();
+        
+        // These should never be reached
+        await peripheral.readHandleAsync(mockHandle);
+        await peripheral.writeHandleAsync(mockHandle, Buffer.alloc(0));
+        
+        return 'completed';
+      };
+      
+      await expect(runOperations()).rejects.toEqual(expect.objectContaining({
+        message: 'Peripheral disconnected'
+      }));
+    });
+    
+    test('multiple concurrent async operations should all fail on disconnect', async () => {
+      setupDisconnectMock(true, 5);
+      
+      // Start multiple operations at the same time
+      const promises = [
+        peripheral.updateRssiAsync(),
+        peripheral.discoverServicesAsync(),
+        peripheral.readHandleAsync(mockHandle),
+        peripheral.writeHandleAsync(mockHandle, Buffer.alloc(0))
+      ];
+      
+      // All operations should fail with the same disconnect error
+      await Promise.all(promises.map(promise => 
+        expect(promise).rejects.toEqual(expect.objectContaining({
+          message: 'Peripheral disconnected'
+        }))
+      ));
+    });
+  });
 });
