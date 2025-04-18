@@ -2,7 +2,7 @@
 
 [![npm version](https://badgen.net/npm/v/@stoprocent/noble)](https://www.npmjs.com/package/@stoprocent/noble)
 [![npm downloads](https://badgen.net/npm/dt/@stoprocent/noble)](https://www.npmjs.com/package/@stoprocent/noble)
-[![Build Status](https://travis-ci.org/stoprocent/noble.svg?branch=master)](https://travis-ci.org/stoprocent/noble)
+
 
 A Node.js BLE (Bluetooth Low Energy) central module.
 
@@ -36,53 +36,294 @@ npm install @stoprocent/noble
 
 ## Usage
 
-```javascript
-const noble = require('@stoprocent/noble');
+### TypeScript (Recommended)
+
+```typescript
+import noble from '@stoprocent/noble';
+// or
+import { withBindings } from '@stoprocent/noble';
+const noble = withBindings('default');
 ```
 
-## Documentation
+### JavaScript
 
-* [Quick Start Example](#quick-start-example)
-* [Installation](#installation)
-* [API docs](#api-docs)
-* [Advanced usage](#advanced-usage)
-* [Common problems](#common-problems)
+```javascript
+const noble = require('@stoprocent/noble');
+// or
+const { withBindings } = require('@stoprocent/noble');
+const noble = withBindings('default');
+```
+
+For more detailed examples and API documentation, see [Binding Types](#Binding-Types) below.
 
 ## Quick Start Example
 
-```javascript
-// Read the battery level of the first found peripheral exposing the Battery Level characteristic
-const noble = require('../');
+### TypeScript Example (Modern Async/Await)
 
-async function run() {
+#### Basic Connection and Service Discovery
+
+```typescript
+import { withBindings } from '@stoprocent/noble';
+
+async function connectToDevice(targetAddress: string) {
+  // Initialize noble with default bindings
+  const noble = withBindings('default');
+  
+  // Wait for Bluetooth adapter to be ready
+  await noble.waitForPoweredOnAsync();
+  
+  // Scan for devices
+  await noble.startScanningAsync([], false);
+  
+  // Option 1: Using async generator to discover devices
+  for await (const peripheral of noble.discoverAsync()) {
+    if (peripheral.address === targetAddress) {
+      await noble.stopScanningAsync();
+      await peripheral.connectAsync();
+      return peripheral;
+    }
+  }
+  
+  // Option 2: Direct connection without scanning
+  // return await noble.connectAsync(targetAddress);
+}
+```
+
+#### Working with Services and Characteristics
+
+```typescript
+async function exploreServices(peripheral) {
+  // Discover all services and characteristics at once
+  const { services } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
+  
+  const results = [];
+  
+  for (const service of services) {
+    const serviceInfo = {
+      uuid: service.uuid,
+      characteristics: []
+    };
+    
+    for (const characteristic of service.characteristics) {
+      const characteristicInfo = {
+        uuid: characteristic.uuid,
+        properties: characteristic.properties
+      };
+      
+      // Read the characteristic if it's readable
+      if (characteristic.properties.includes('read')) {
+        characteristicInfo.value = await characteristic.readAsync();
+      }
+      
+      serviceInfo.characteristics.push(characteristicInfo);
+    }
+    
+    results.push(serviceInfo);
+  }
+  
+  return results;
+}
+```
+
+#### Reading and Writing Data
+
+```typescript
+async function readBatteryLevel(peripheral) {
+  // Get battery service (0x180F is the standard UUID for Battery Service)
+  const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+    ['180f'], // Battery Service
+    ['2a19']  // Battery Level Characteristic
+  );
+  
+  if (characteristics.length > 0) {
+    const data = await characteristics[0].readAsync();
+    return data[0]; // Battery percentage
+  }
+  
+  return null;
+}
+
+async function writeCharacteristic(peripheral, serviceUuid, characteristicUuid, data) {
+  const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+    [serviceUuid], 
+    [characteristicUuid]
+  );
+  
+  if (characteristics.length > 0) {
+    // false = with response, true = without response
+    const requiresResponse = !characteristics[0].properties.includes('writeWithoutResponse');
+    await characteristics[0].writeAsync(data, !requiresResponse);
+    return true;
+  }
+  
+  return false;
+}
+```
+
+### JavaScript Example (Battery Level)
+
+```javascript
+const { withBindings } = require('@stoprocent/noble');
+
+// Read the battery level of the first found peripheral exposing the Battery Level characteristic
+async function readBatteryLevel() {
+  const noble = withBindings('default');
+
   try {
-    await noble.waitForPoweredOn();
+    await noble.waitForPoweredOnAsync();
     await noble.startScanningAsync(['180f'], false);
+    
+    noble.on('discover', async (peripheral) => {
+      await noble.stopScanningAsync();
+      await peripheral.connectAsync();
+      
+      const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(['180f'], ['2a19']);
+      const batteryLevel = (await characteristics[0].readAsync())[0];
+
+      console.log(`${peripheral.address} (${peripheral.advertisement.localName}): ${batteryLevel}%`);
+
+      await peripheral.disconnectAsync();
+      process.exit(0);
+    });
   } catch (error) {
     console.error(error);
   }
 }
 
-noble.on('discover', async (peripheral) => {
-  await noble.stopScanningAsync();
-  await peripheral.connectAsync();
-  const {characteristics} = await peripheral.discoverSomeServicesAndCharacteristicsAsync(['180f'], ['2a19']);
-  const batteryLevel = (await characteristics[0].readAsync())[0];
+readBatteryLevel();
+```
 
-  console.log(`${peripheral.address} (${peripheral.advertisement.localName}): ${batteryLevel}%`);
+## API Overview
 
-  await peripheral.disconnectAsync();
-  process.exit(0);
+Noble provides both callback-based and Promise-based (Async) APIs:
+
+### Binding Types
+
+```typescript
+// Default binding (automatically selects based on platform)
+import noble from '@stoprocent/noble';
+// or
+import { withBindings } from '@stoprocent/noble';
+const noble = withBindings('default');
+
+// Specific bindings
+const nobleHci = withBindings('hci');  // HCI socket binding
+const nobleMac = withBindings('mac');  // macOS binding
+const nobleWin = withBindings('win');  // Windows binding
+
+// Custom options for HCI binding (Using UART HCI Dongle)
+const nobleCustom = withBindings('hci', { 
+  hciDriver: 'uart',
+  bindParams: {
+    uart: {
+      port: '/dev/ttyUSB0',
+      baudRate: 1000000
+    }
+  }
 });
 
-run();
-
+// Custom options for HCI binding (Native)
+const nobleCustom = withBindings('hci', { 
+  hciDriver: 'native',
+  deviceId: 0 // This could be also set by env.NOBLE_HCI_DEVICE_ID=0
+});
 ```
-## Use Noble With BLE5 Extended Features With HCI 
 
-```javascript
-const noble = require('@stoprocent/noble/with-custom-binding')({extended: true});
+### Core Methods
 
+```typescript
+// Wait for adapter to be powered on
+await noble.waitForPoweredOnAsync(timeout?: number);
+
+// Start scanning
+await noble.startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean);
+
+// Stop scanning
+await noble.stopScanningAsync();
+
+// Discover peripherals as an async generator
+for await (const peripheral of noble.discoverAsync()) {
+  // handle each discovered peripheral
+}
+
+// Connect directly to a peripheral by ID or address
+const peripheral = await noble.connectAsync(idOrAddress, options?);
+
+// Set adapter address (HCI only)
+noble.setAddress('00:11:22:33:44:55');
+
+// Reset adapter
+noble.reset();
+
+// Stop noble
+noble.stop();
+```
+
+### Peripheral Methods
+
+```typescript
+// Connect to peripheral
+await peripheral.connectAsync();
+
+// Disconnect from peripheral
+await peripheral.disconnectAsync();
+
+// Update RSSI
+const rssi = await peripheral.updateRssiAsync();
+
+// Discover services
+const services = await peripheral.discoverServicesAsync(['180f']); // Optional service UUIDs
+
+// Discover all services and characteristics
+const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
+
+// Discover specific services and characteristics
+const { services, characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+  ['180f'], ['2a19']
+);
+
+// Read and write handles
+const data = await peripheral.readHandleAsync(handle);
+await peripheral.writeHandleAsync(handle, data, withoutResponse);
+```
+
+### Service Methods
+
+```typescript
+// Discover included services
+const includedServiceUuids = await service.discoverIncludedServicesAsync([serviceUUIDs]);
+
+// Discover characteristics
+const characteristics = await service.discoverCharacteristicsAsync([characteristicUUIDs]);
+```
+
+### Characteristic Methods
+
+```typescript
+// Read characteristic value
+const data = await characteristic.readAsync();
+
+// Write characteristic value
+await characteristic.writeAsync(data, withoutResponse);
+
+// Subscribe to notifications
+await characteristic.subscribeAsync();
+
+// Unsubscribe from notifications
+await characteristic.unsubscribeAsync();
+
+// Discover descriptors
+const descriptors = await characteristic.discoverDescriptorsAsync();
+```
+
+### Descriptor Methods
+
+```typescript
+// Read descriptor value
+const value = await descriptor.readValueAsync();
+
+// Write descriptor value
+await descriptor.writeValueAsync(data);
 ```
 
 ## Installation
@@ -105,7 +346,7 @@ const noble = require('@stoprocent/noble/with-custom-binding')({extended: true})
 
 Please refer to [https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os](https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os)
 
-##### Example 1 (UART port spcified as enviromental variable)
+##### Example 1 (UART port specified as environmental variable)
 
 ```bash
 $ export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/tty...
@@ -114,25 +355,26 @@ $ export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000
 
 __NOTE:__ `BLUETOOTH_HCI_SOCKET_UART_BAUDRATE` defaults to `1000000` so only needed if different.
 
-```javascript
-const noble = require('@stoprocent/noble');
+```typescript
+import noble from '@stoprocent/noble';
 ```
 
-##### Example 2 (UART port spcified in `bindParams`)
+##### Example 2 (UART port specified in `bindParams`)
 
 ```bash
 $ export BLUETOOTH_HCI_SOCKET_FORCE_UART=1
 ```
 
-```javascript
-const noble = require('@stoprocent/noble/with-custom-binding') ( { 
+```typescript
+import { withBindings } from '@stoprocent/noble';
+const noble = withBindings('hci', { 
   bindParams: { 
     uart: { 
       port: '/dev/tty...', 
       baudRate: 1000000
     } 
   } 
-} );
+});
 ```
 
 __NOTE:__ There is a [UART code example](examples/uart-bind-params.js) in the `/examples` directory.
@@ -221,7 +463,7 @@ See [@don](https://github.com/don)'s setup guide on [Bluetooth LE with Node.js a
 
 #### Docker
 
-Make sure your container runs with `--network=host` options and all specific environment preriquisites are verified.
+Make sure your container runs with `--network=host` options and all specific environment prerequisites are verified.
 
 ### Installing and using the package
 
@@ -235,539 +477,21 @@ set BLUETOOTH_HCI_SOCKET_USB_VID=xxx
 set BLUETOOTH_HCI_SOCKET_USB_PID=xxx
 ```
 
-```javascript
-const noble = require('@stoprocent/noble');
-```
-
-## API docs
-
-All operations have two API variants – one expecting a callback, one returning a Promise (denoted by `Async` suffix).
-
-Additionally, there are events corresponding to each operation (and a few global events).
-
-For example, in case of the "discover services" operation of Peripheral:
-
-* There's a `discoverServices` method expecting a callback:
-   ```javascript
-   peripheral.discoverServices((error, services) => {
-     // callback - handle error and services
-   });
-   ```
-* There's a `discoverServicesAsync` method returning a Promise:
-  ```javascript
-  try {
-    const services = await peripheral.discoverServicesAsync();
-    // handle services
-  } catch (e) {
-    // handle error
-  }
-  ```
-* There's a `servicesDiscover` event emitted after services are discovered:
-  ```javascript
-  peripheral.once('servicesDiscover', (services) => {
-    // handle services
-  });
-  ```
-
-API structure:
-
-* [Scanning and discovery](#scanning-and-discovery)
-  * [_Event: Adapter state changed_](#event-adapter-state-changed)
-  * [Set address](#set-address)
-  * [Start scanning](#start-scanning)
-  * [_Event: Scanning started_](#event-scanning-started)
-  * [Stop scanning](#stop-scanning)
-  * [_Event: Scanning stopped_](#event-scanning-stopped)
-  * [Connect by UUID / Address](#connect-by-uuid)
-  * [_Event: Peripheral discovered_](#event-peripheral-discovered)
-  * [_Event: Warning raised_](#event-warning-raised)
-* [Reset device](#reset-device)
-* [Peripheral](#peripheral)
-  * [Connect](#connect)
-  * [_Event: Connected_](#event-connected)
-  * [Cancel a pending connection](#cancel-a-pending-connection)
-  * [Disconnect](#disconnect)
-  * [_Event: Disconnected_](#event-disconnected)
-  * [Update RSSI](#update-rssi)
-  * [_Event: RSSI updated_](#event-rssi-updated)
-  * [Discover services](#discover-services)
-  * [Discover all services and characteristics](#discover-all-services-and-characteristics)
-  * [Discover some services and characteristics](#discover-some-services-and-characteristics)
-  * [_Event: Services discovered_](#event-services-discovered)
-  * [Read handle](#read-handle)
-  * [_Event: Handle read_](#event-handle-read)
-  * [Write handle](#write-handle)
-  * [_Event: Handle written_](#event-handle-written)
-* [Service](#service)
-  * [Discover included services](#discover-included-services)
-  * [_Event: Included services discovered_](#event-included-services-discovered)
-  * [Discover characteristics](#discover-characteristics)
-  * [_Event: Characteristics discovered_](#event-characteristics-discovered)
-* [Characteristic](#characteristic)
-  * [Read](#read)
-  * [_Event: Data read_](#event-data-read)
-  * [Write](#write)
-  * [_Event: Data written_](#event-data-written)
-  * [Broadcast](#broadcast)
-  * [_Event: Broadcast sent_](#event-broadcast-sent)
-  * [Subscribe](#subscribe)
-  * [_Event: Notification received_](#event-notification-received)
-  * [Unsubscribe](#unsubscribe)
-  * [Discover descriptors](#discover-descriptors)
-  * [_Event: Descriptors discovered_](#event-descriptors-discovered)
-* [Descriptor](#descriptor)
-  * [Read value](#read-value)
-  * [_Event: Value read_](#event-value-read)
-  * [Write value](#write-value)
-  * [_Event: Value written_](#event-value-written)
-
-### Scanning and discovery
-
-#### _Event: Adapter state changed_
-
-```javascript
-noble.on('stateChange', callback(state));
-```
-
-`state` can be one of:
-* `unknown`
-* `resetting`
-* `unsupported`
-* `unauthorized`
-* `poweredOff`
-* `poweredOn`
-
-#### Set address
-
-```javascript
-noble.setAddress('00:11:22:33:44:55'); // set adapter's mac address
-```
-__NOTE:__ Curently this feature is only supported on HCI as it's using vendor specific commands. Source of the commands is based on the [BlueZ bdaddr.c](https://github.com/pauloborges/bluez/blob/master/tools/bdaddr.c).
-__NOTE:__ `noble.state` must be `poweredOn` before address can be set. `noble.on('stateChange', callback(state));` can be used to listen for state change events.
-
-#### Start scanning
-
-```javascript
-noble.startScanning(); // any service UUID, no duplicates
-
-
-noble.startScanning([], true); // any service UUID, allow duplicates
-
-
-var serviceUUIDs = ['<service UUID 1>', ...]; // default: [] => all
-var allowDuplicates = falseOrTrue; // default: false
-
-noble.startScanning(serviceUUIDs, allowDuplicates[, callback(error)]); // particular UUIDs
-```
-
-__NOTE:__ `noble.state` must be `poweredOn` before scanning is started. `noble.on('stateChange', callback(state));` can be used to listen for state change events.
-
-#### _Event: Scanning started_
-
-```javascript
-noble.on('scanStart', callback);
-```
-
-The event is emitted when:
-* Scanning is started
-* Another application enables scanning
-* Another application changes scanning settings
-
-#### Stop scanning
-
-```javascript
-noble.stopScanning();
-```
-
-#### _Event: Scanning stopped_
-
-```javascript
-noble.on('scanStop', callback);
-```
-
-The event is emitted when:
-* Scanning is stopped
-* Another application stops scanning
-
-#### Connect by UUID
-
-The `connect` function is used to establish a Bluetooth Low Energy connection to a peripheral device using its UUID. It provides both callback-based and Promise-based interfaces.
-
-##### Usage
-
 ```typescript
-// Callback-based usage
-connect(peripheralUuid: string, options?: object, callback?: (error?: Error, peripheral: Peripheral) => void): void;
+// TypeScript
+import noble from '@stoprocent/noble';
+// or with custom bindings
+import { withBindings } from '@stoprocent/noble';
+const noble = withBindings('default');
 
-// Promise-based usage
-connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
-```
-
-##### Parameters
-- `peripheralUuid`: The UUID of the peripheral to connect to.
-- `options`: Optional parameters for the connection (this may include connection interval, latency, supervision timeout, etc.).
-- `callback`: An optional callback that returns an error or the connected peripheral object.
-
-##### Description
-The `connect` function initiates a connection to a BLE peripheral. The function immediately returns, and the actual connection result is provided asynchronously via the callback or Promise. If the peripheral is successfully connected, a `Peripheral` object representing the connected device is provided.
-
-##### Example
-
-```javascript
+// JavaScript
 const noble = require('@stoprocent/noble');
-
-// Using callback
-noble.connect('1234567890abcdef', {}, (error, peripheral) => {
-  if (error) {
-    console.error('Connection error:', error);
-  } else {
-    console.log('Connected to:', peripheral.uuid);
-  }
-});
-
-// Using async/await
-async function connectPeripheral() {
-  try {
-    const peripheral = await noble.connectAsync('1234567890abcdef');
-    console.log('Connected to:', peripheral.uuid);
-  } catch (error) {
-    console.error('Connection error:', error);
-  }
-}
-connectPeripheral();
+// or with custom bindings
+const { withBindings } = require('@stoprocent/noble');
+const noble = withBindings('default');
 ```
 
 
-#### _Event: Peripheral discovered_
-
-```javascript
-noble.on('discover', callback(peripheral));
-```
-
-* `peripheral`:
-  ```javascript
-  {
-    id: '<id>',
-    address: '<BT address'>, // Bluetooth Address of device, or 'unknown' if not known
-    addressType: '<BT address type>', // Bluetooth Address type (public, random), or 'unknown' if not known
-    connectable: trueOrFalseOrUndefined, // true or false, or undefined if not known
-    advertisement: {
-      localName: '<name>',
-      txPowerLevel: someInteger,
-      serviceUuids: ['<service UUID>', ...],
-      serviceSolicitationUuid: ['<service solicitation UUID>', ...],
-      manufacturerData: someBuffer, // a Buffer
-      serviceData: [
-          {
-              uuid: '<service UUID>',
-              data: someBuffer // a Buffer
-          },
-          // ...
-      ]
-    },
-    rssi: integerValue,
-    mtu: integerValue // MTU will be null, until device is connected and hci-socket is used
-  };
-  ```
-
-__Note:__ On macOS, the address will be set to '' if the device has not been connected previously.
-
-
-#### _Event: Warning raised_
-
-```javascript
-noble.on('warning', callback(message));
-```
-
-### Reset device
-
-```javascript
-noble.reset()
-```
-
-### Peripheral
-
-#### Connect
-
-```javascript
-peripheral.connect([callback(error)]);
-```
-
-Some of the bluetooth devices doesn't connect seamlessly, may be because of bluetooth device firmware or kernel. Do reset the device with noble.reset() API before connect API.
-
-#### _Event: Connected_
-
-```javascript
-peripheral.once('connect', callback);
-```
-
-#### Cancel a pending connection
-
-```javascript
-peripheral.cancelConnect();
-// Will emit a 'connect' event with error
-```
-
-#### Disconnect
-
-```javascript
-peripheral.disconnect([callback(error)]);
-```
-
-#### _Event: Disconnected_
-
-```javascript
-peripheral.once('disconnect', callback);
-```
-
-#### Update RSSI
-
-```javascript
-peripheral.updateRssi([callback(error, rssi)]);
-```
-
-#### _Event: RSSI updated_
-
-```javascript
-peripheral.once('rssiUpdate', callback(rssi));
-```
-
-#### Discover services
-
-```javascript
-peripheral.discoverServices(); // any service UUID
-
-var serviceUUIDs = ['<service UUID 1>', ...];
-peripheral.discoverServices(serviceUUIDs[, callback(error, services)]); // particular UUIDs
-```
-
-#### Discover all services and characteristics
-
-```javascript
-peripheral.discoverAllServicesAndCharacteristics([callback(error, services, characteristics)]);
-```
-
-#### Discover some services and characteristics
-
-```javascript
-var serviceUUIDs = ['<service UUID 1>', ...];
-var characteristicUUIDs = ['<characteristic UUID 1>', ...];
-peripheral.discoverSomeServicesAndCharacteristics(serviceUUIDs, characteristicUUIDs, [callback(error, services, characteristics));
-```
-
-#### _Event: Services discovered_
-
-```javascript
-peripheral.once('servicesDiscover', callback(services));
-```
-
-#### Read handle
-
-```javascript
-peripheral.readHandle(handle, callback(error, data));
-```
-
-#### _Event: Handle read_
-
-```javascript
-peripheral.once('handleRead<handle>', callback(data)); // data is a Buffer
-```
-
-`<handle>` is the handle identifier.
-
-#### Write handle
-
-```javascript
-peripheral.writeHandle(handle, data, withoutResponse, callback(error));
-```
-
-#### _Event: Handle written_
-
-```javascript
-peripheral.once('handleWrite<handle>', callback());
-```
-
-`<handle>` is the handle identifier.
-
-### Service
-
-#### Discover included services
-
-```javascript
-service.discoverIncludedServices(); // any service UUID
-
-var serviceUUIDs = ['<service UUID 1>', ...];
-service.discoverIncludedServices(serviceUUIDs[, callback(error, includedServiceUuids)]); // particular UUIDs
-```
-
-#### _Event: Included services discovered_
-
-```javascript
-service.once('includedServicesDiscover', callback(includedServiceUuids));
-```
-
-#### Discover characteristics
-
-```javascript
-service.discoverCharacteristics() // any characteristic UUID
-
-var characteristicUUIDs = ['<characteristic UUID 1>', ...];
-service.discoverCharacteristics(characteristicUUIDs[, callback(error, characteristics)]); // particular UUIDs
-```
-
-#### _Event: Characteristics discovered_
-
-```javascript
-service.once('characteristicsDiscover', callback(characteristics));
-```
-
-* `characteristics`
-  ```javascript
-  {
-    uuid: '<uuid>',
-    properties: ['...'] // 'broadcast', 'read', 'writeWithoutResponse', 'write', 'notify', 'indicate', 'authenticatedSignedWrites', 'extendedProperties'
-  };
-  ```
-
-### Characteristic
-
-#### Read
-
-```javascript
-characteristic.read([callback(error, data)]);
-```
-
-#### _Event: Data read_
-
-```javascript
-characteristic.on('data', callback(data, isNotification));
-
-characteristic.once('read', callback(data, isNotification)); // legacy
-```
-
-Emitted when:
-* Characteristic read has completed, result of `characteristic.read(...)`
-* Characteristic value has been updated by peripheral via notification or indication, after having been enabled with `characteristic.notify(true[, callback(error)])`
-
-**Note:** `isNotification` event parameter value MAY be `undefined` depending on platform. The parameter is **deprecated** after version 1.8.1, and not supported on macOS High Sierra and later.
-
-#### Write
-
-```javascript
-characteristic.write(data, withoutResponse[, callback(error)]); // data is a Buffer, withoutResponse is true|false
-```
-
-* `withoutResponse`:
-  * `false`: send a write request, used with "write" characteristic property
-  * `true`: send a write command, used with "write without response" characteristic property
-
-
-#### _Event: Data written_
-
-```javascript
-characteristic.once('write', withoutResponse, callback());
-```
-
-Emitted when characteristic write has completed, result of `characteristic.write(...)`.
-
-#### Broadcast
-
-```javascript
-characteristic.broadcast(broadcast[, callback(error)]); // broadcast is true|false
-```
-
-#### _Event: Broadcast sent_
-
-```javascript
-characteristic.once('broadcast', callback(state));
-```
-
-Emitted when characteristic broadcast state changes, result of `characteristic.broadcast(...)`.
-
-#### Subscribe
-
-```javascript
-characteristic.subscribe([callback(error)]);
-```
-
-Subscribe to a characteristic.
-
-Triggers `data` events when peripheral sends a notification or indication. Use for characteristics with "notify" or "indicate" properties.
-
-#### _Event: Notification received_
-
-```javascript
-characteristic.once('notify', callback(state));
-```
-
-Emitted when characteristic notification state changes, result of `characteristic.notify(...)`.
-
-#### Unsubscribe
-
-```javascript
-characteristic.unsubscribe([callback(error)]);
-```
-
-Unsubscribe from a characteristic.
-
-Use for characteristics with "notify" or "indicate" properties
-
-#### Discover descriptors
-
-```javascript
-characteristic.discoverDescriptors([callback(error, descriptors)]);
-```
-
-#### _Event: Descriptors discovered_
-
-```javascript
-characteristic.once('descriptorsDiscover', callback(descriptors));
-```
-* `descriptors`:
-  ```javascript
-  [
-    {
-      uuid: '<uuid>'
-    },
-    // ...
-  ]
-  ```
-
-### Descriptor
-
-#### Read value
-
-```javascript
-descriptor.readValue([callback(error, data)]);
-```
-
-#### _Event: Value read_
-
-```javascript
-descriptor.once('valueRead', data); // data is a Buffer
-```
-
-#### Write value
-
-```javascript
-descriptor.writeValue(data[, callback(error)]); // data is a Buffer
-```
-
-#### _Event: Value written_
-
-```javascript
-descriptor.once('valueWrite');
-```
-
-## Advanced usage
-
-### Override default bindings
-
-By default, noble will select appropriate Bluetooth device bindings based on your platform. You can provide custom bindings using the `with-bindings` module.
-
-```javascript
-var noble = require('@stoprocent/noble/with-bindings')(require('./my-custom-bindings'));
-```
 
 ### Running without root/sudo (Linux-specific)
 
