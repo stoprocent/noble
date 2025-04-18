@@ -777,4 +777,49 @@ describe('noble', () => {
       expect(peripheral.emit).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('state change handling', () => {
+    test('should disconnect peripherals when state changes to poweredOff', () => {
+      // Setup a connected peripheral
+      const peripheral = {
+        id: 'test-peripheral',
+        state: 'connected',
+        emit: jest.fn()
+      };
+      noble._peripherals.set('test-peripheral', peripheral);
+      noble._state = 'poweredOn';
+      
+      // Mock the _onDisconnect method to verify it's called
+      const originalOnDisconnect = noble._onDisconnect;
+      noble._onDisconnect = jest.fn();
+      
+      // Trigger state change to poweredOff
+      noble._onStateChange('poweredOff');
+      
+      // Check if _onDisconnect was called for the peripheral
+      expect(noble._onDisconnect).toHaveBeenCalledWith('test-peripheral', 'cleanup');
+      
+      // Restore original method
+      noble._onDisconnect = originalOnDisconnect;
+    });
+    
+    test('should update peripheral state when cleaned up during poweredOff', () => {
+      // Setup a connected peripheral
+      const peripheral = {
+        id: 'test-peripheral',
+        state: 'connected',
+        emit: jest.fn()
+      };
+      noble._peripherals.set('test-peripheral', peripheral);
+      
+      // Call the cleanup method directly
+      noble._cleanupPeriperals('test-peripheral');
+      
+      // Verify peripheral emitted disconnect event
+      expect(peripheral.emit).toHaveBeenCalledWith('disconnect', 'cleanup');
+      
+      // Verify peripheral state was updated
+      expect(peripheral.state).toBe('disconnected');
+    });
+  });
 });
