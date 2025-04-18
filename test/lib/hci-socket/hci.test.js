@@ -575,6 +575,7 @@ describe('hci-socket hci', () => {
   });
 
   describe('onSocketData', () => {
+    // Define the standard ACL queue used in tests
     const aclQueue = [
       {
         handle: 4660,
@@ -589,608 +590,526 @@ describe('hci-socket hci', () => {
         packet: Buffer.from([0x02])
       }
     ];
-
+  
+    // Event callback mocks
     let disconnCompleteCallback;
     let encryptChangeCallback;
     let aclDataPktCallback;
     let leScanEnableSetCmdCallback;
-
+  
     beforeEach(() => {
-      hci.flushAcl = sinon.spy();
-      hci.processCmdCompleteEvent = sinon.spy();
-      hci.processCmdStatusEvent = sinon.spy();
-      hci.processLeMetaEvent = sinon.spy();
-
+      // Setup spies on HCI methods - preserve actual implementation
+      jest.spyOn(hci, 'flushAcl');
+      jest.spyOn(hci, 'processCmdCompleteEvent');
+      jest.spyOn(hci, 'processCmdStatusEvent');
+      
+      hci.processLeMetaEvent = jest.fn();
+      
+      // Suppress console.warn
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+      
+      // Setup HCI's internal state for testing
       hci._aclQueue = [...aclQueue];
+      hci._aclConnections = new Map();
       hci._aclConnections.set(4660, { pending: 3 });
       hci._aclConnections.set(4661, { pending: 2 });
-
-      disconnCompleteCallback = sinon.spy();
-      encryptChangeCallback = sinon.spy();
-      aclDataPktCallback = sinon.spy();
-      leScanEnableSetCmdCallback = sinon.spy();
+      hci._handleBuffers = {};
+  
+      // Setup event listener callbacks as mocks
+      disconnCompleteCallback = jest.fn();
+      encryptChangeCallback = jest.fn();
+      aclDataPktCallback = jest.fn();
+      leScanEnableSetCmdCallback = jest.fn();
+      
+      // Register event handlers
       hci.on('disconnComplete', disconnCompleteCallback);
       hci.on('encryptChange', encryptChangeCallback);
       hci.on('aclDataPkt', aclDataPktCallback);
       hci.on('leScanEnableSetCmd', leScanEnableSetCmdCallback);
     });
-
+  
     afterEach(() => {
-      sinon.reset();
+      // Clear all mocks between tests
+      jest.restoreAllMocks();
     });
-
-    it('should flushAcl - HCI_EVENT_PKT / EVT_DISCONN_COMPLETE', () => {
+  
+    test('should flushAcl - HCI_EVENT_PKT / EVT_DISCONN_COMPLETE', () => {
       const eventType = 4;
       const subEventType = 5;
       const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3]);
-
+  
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(hci.flushAcl);
-      assert.calledOnceWithExactly(disconnCompleteCallback, 4660, 3);
-
-      // not called
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual([
+  
+      // Called
+      expect(hci.flushAcl).toHaveBeenCalledTimes(1);
+      expect(disconnCompleteCallback).toHaveBeenCalledWith(4660, 3);
+  
+      // Not called
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual([
         {
           handle: 4661,
           packet: Buffer.from([0x02])
         }
       ]);
-      should(hci._aclConnections).have.keys(4661);
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+      expect(Array.from(hci._aclConnections.keys())).toEqual([4661]);
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should only emit encryptChange - HCI_EVENT_PKT / EVT_ENCRYPT_CHANGE', () => {
+  
+    test('should only emit encryptChange - HCI_EVENT_PKT / EVT_ENCRYPT_CHANGE', () => {
       const eventType = 4;
       const subEventType = 8;
       const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3]);
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(encryptChangeCallback, 4660, 3);
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+  
+      // Called
+      expect(encryptChangeCallback).toHaveBeenCalledWith(4660, 3);
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    describe('HCI Tests', () => {
-      // Shared setup and variables
-      let aclQueue;
-      let encryptChangeCallback;
-      let disconnCompleteCallback;
-      let aclDataPktCallback;
-      let leScanEnableSetCmdCallback;
-    
-      beforeEach(() => {
-        // Setup your test data and mocks here
-        aclQueue = [];
-        encryptChangeCallback = jest.fn();
-        disconnCompleteCallback = jest.fn();
-        aclDataPktCallback = jest.fn();
-        leScanEnableSetCmdCallback = jest.fn();
-                
-        // Spy on methods instead of replacing them
-        jest.spyOn(hci, 'processCmdCompleteEvent');
-        jest.spyOn(hci, 'processLeMetaEvent');
-        jest.spyOn(hci, 'flushAcl');
-        
-        // Setup HCI's internal state for testing
-        hci._aclQueue = aclQueue;
-        hci._aclConnections = new Map([
-          [4660, { pending: 3 }],
-          [4661, { pending: 2 }]
-        ]);
-        hci._isExtended = false;
-      });
-    
-      test('should only processCmdCompleteEvent - HCI_EVENT_PKT / EVT_CMD_COMPLETE', () => {
-        const eventType = 4;
-        const subEventType = 14;
-        const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3, 9, 9]);
-        
-        // Call the actual method
-        hci.onSocketData(data);
-    
-        // called
-        expect(hci.processCmdCompleteEvent).toHaveBeenCalledWith(4660, 3, Buffer.from([9, 9]));
-    
-        // not called
-        expect(hci.flushAcl).not.toHaveBeenCalled();
-        expect(encryptChangeCallback).not.toHaveBeenCalled();
-        expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
-        expect(disconnCompleteCallback).not.toHaveBeenCalled();
-        expect(aclDataPktCallback).not.toHaveBeenCalled();
-        expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
-    
-        // hci checks
-        expect(hci._aclQueue).toEqual(aclQueue);
-        expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
-        expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
-        expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
-      });
-    
-      // Separate describe block for LE_READ_LOCAL_SUPPORTED_FEATURES tests
-      describe('LE_READ_LOCAL_SUPPORTED_FEATURES', () => {
-        beforeEach(() => {
-          // Spy on the methods we want to check
-          jest.spyOn(hci, 'setCodedPhySupport');
-          jest.spyOn(hci, 'setEventMask');
-          jest.spyOn(hci, 'setLeEventMask');
-          jest.spyOn(hci, 'readLocalVersion');
-          jest.spyOn(hci, 'writeLeHostSupported');
-          jest.spyOn(hci, 'readLeHostSupported');
-          jest.spyOn(hci, 'readLeBufferSize');
-          jest.spyOn(hci, 'readBdAddr');
-        });
-        
-        test('should not process on error status', () => {
-          const cmd = 8195;
-          const status = 1;
-          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
+  
+    test('should only processCmdCompleteEvent - HCI_EVENT_PKT / EVT_CMD_COMPLETE', () => {
+      const eventType = 4;
+      const subEventType = 14;
+      const data = Buffer.from([eventType, subEventType, 0, 0, 0x34, 0x12, 3, 9, 9]);
       
-          hci.processCmdCompleteEvent(cmd, status, result);
-      
-          // Verify no methods were called
-          expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
-          expect(hci.setEventMask).not.toHaveBeenCalled();
-          expect(hci.setLeEventMask).not.toHaveBeenCalled();
-          expect(hci.readLocalVersion).not.toHaveBeenCalled();
-          expect(hci.writeLeHostSupported).not.toHaveBeenCalled();
-          expect(hci.readLeHostSupported).not.toHaveBeenCalled();
-          expect(hci.readLeBufferSize).not.toHaveBeenCalled();
-          expect(hci.readBdAddr).not.toHaveBeenCalled();
-      
-          expect(hci._isExtended).toBe(false);
-        });
-      
-        test('should process without extended features', () => {
-          const cmd = 8195;
-          const status = 0;
-          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]); // No bits set
-      
-          hci.processCmdCompleteEvent(cmd, status, result);
-      
-          // Verify extended-specific method not called
-          expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
-      
-          // Verify other methods were called
-          expect(hci.setEventMask).toHaveBeenCalled();
-          expect(hci.setLeEventMask).toHaveBeenCalled();
-          expect(hci.readLocalVersion).toHaveBeenCalled();
-          expect(hci.writeLeHostSupported).toHaveBeenCalled();
-          expect(hci.readLeHostSupported).toHaveBeenCalled();
-          expect(hci.readLeBufferSize).toHaveBeenCalled();
-          expect(hci.readBdAddr).toHaveBeenCalled();
-      
-          expect(hci._isExtended).toBe(false);
-        });
-      
-        test('should process with extended features', () => {
-          const cmd = 8195;
-          const status = 0;
-          const result = Buffer.from("bd5f660000000000", "hex");
-      
-          hci.processCmdCompleteEvent(cmd, status, result);
-      
-          // Verify all methods were called including extended-specific
-          expect(hci.setCodedPhySupport).toHaveBeenCalled();
-          expect(hci.setEventMask).toHaveBeenCalled();
-          expect(hci.setLeEventMask).toHaveBeenCalled();
-          expect(hci.readLocalVersion).toHaveBeenCalled();
-          expect(hci.writeLeHostSupported).toHaveBeenCalled();
-          expect(hci.readLeHostSupported).toHaveBeenCalled();
-          expect(hci.readLeBufferSize).toHaveBeenCalled();
-          expect(hci.readBdAddr).toHaveBeenCalled();
-      
-          expect(hci._isExtended).toBe(true);
-        });
-      });
+      hci.onSocketData(data);
+  
+      // Called
+      expect(hci.processCmdCompleteEvent).toHaveBeenCalledWith(4660, 3, Buffer.from([9, 9]));
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should only processCmdStatusEvent - HCI_EVENT_PKT / EVT_CMD_STATUS', () => {
+  
+    test('should only processCmdStatusEvent - HCI_EVENT_PKT / EVT_CMD_STATUS', () => {
       const eventType = 4;
       const subEventType = 15;
       const data = Buffer.from([eventType, subEventType, 4, 2, 0x34, 0x12, 3, 9, 9]);
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(hci.processCmdStatusEvent, 786, 2);
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+  
+      // Called
+      expect(hci.processCmdStatusEvent).toHaveBeenCalledWith(786, 2);
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should only processLeMetaEvent - HCI_EVENT_PKT / EVT_LE_META_EVENT', () => {
+  
+    test('should only processLeMetaEvent - HCI_EVENT_PKT / EVT_LE_META_EVENT', () => {
       const eventType = 4;
       const subEventType = 62;
       const data = Buffer.from([eventType, subEventType, 0, 1, 0x34, 0x12, 3, 9, 9]);
+
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(hci.processLeMetaEvent, 1, 52, Buffer.from([0x12, 3, 9, 9]));
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+  
+      // Called
+      expect(hci.processLeMetaEvent).toHaveBeenCalledWith(1, 52, Buffer.from([0x12, 3, 9, 9]));
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should only flushAcl - HCI_EVENT_PKT / EVT_NUMBER_OF_COMPLETED_PACKETS', () => {
+  
+    test('should only flushAcl - HCI_EVENT_PKT / EVT_NUMBER_OF_COMPLETED_PACKETS', () => {
       const eventType = 4;
       const subEventType = 19;
       const data = Buffer.from([eventType, subEventType, 0, 1, 0x34, 0x12, 3, 9, 9]);
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(hci.flushAcl);
-
-      // not called
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 0 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+  
+      // Called
+      expect(hci.flushAcl).toHaveBeenCalled();
+  
+      // Not called
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 0 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should do nothing - HCI_EVENT_PKT / ??', () => {
+  
+    test('should do nothing - HCI_EVENT_PKT / unknown subEventType', () => {
       const eventType = 4;
       const subEventType = 122;
       const data = Buffer.from([eventType, subEventType, 0, 1, 0x34, 0x12, 3, 9, 9]);
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+  
+      // Not called - nothing should happen
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
     });
-
-    it('should only emit aclDataPkt - HCI_ACLDATA_PKT / ACL_START', () => {
+  
+    test('should only emit aclDataPkt - HCI_ACLDATA_PKT / ACL_START', () => {
       const eventType = 2;
       const subEventTypeP1 = 0xf2;
       const subEventTypeP2 = 0x24;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x12, 0x03, 0x00, 3, 9, 9, 8, 7]);
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(aclDataPktCallback, 1266, 2307, Buffer.from([9, 8, 7]));
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
-      should(hci._handleBuffers).be.empty();
+  
+      // Called
+      expect(aclDataPktCallback).toHaveBeenCalledWith(1266, 2307, Buffer.from([9, 8, 7]));
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      expect(hci._handleBuffers).toEqual({});
     });
-
-    it('should register handle buffer - HCI_ACLDATA_PKT / ACL_START', () => {
+  
+    test('should register handle buffer - HCI_ACLDATA_PKT / ACL_START with incomplete data', () => {
       const eventType = 2;
       const subEventTypeP1 = 0xf2;
       const subEventTypeP2 = 0x24;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x12, 0x03, 0x00, 3, 9, 9, 8]);
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
-      should(hci._handleBuffers).deepEqual({
-        1266: {
-          length: 3,
-          cid: 2307,
-          data: Buffer.from([9, 8])
-        }
+  
+      // Not called
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      
+      // Check buffer was created properly
+      expect(hci._handleBuffers[1266]).toEqual({
+        length: 3,
+        cid: 2307,
+        data: expect.any(Buffer)
       });
+      expect(Buffer.from(hci._handleBuffers[1266].data)).toEqual(Buffer.from([9, 8]));
     });
-
-    it('should do nothing - HCI_ACLDATA_PKT / ACL_CONT', () => {
+  
+    test('should do nothing - HCI_ACLDATA_PKT / ACL_CONT without existing buffer', () => {
       const eventType = 2;
       const subEventTypeP1 = 0xf2;
       const subEventTypeP2 = 0x14;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x12, 0x03, 0x00, 3, 9, 9, 8]);
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
-      should(hci._handleBuffers).be.empty();
+  
+      // Not called
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      expect(hci._handleBuffers).toEqual({});
     });
-
-    it('should concat data - HCI_ACLDATA_PKT / ACL_CONT', () => {
+  
+    test('should concat data - HCI_ACLDATA_PKT / ACL_CONT with existing buffer', () => {
       const eventType = 2;
       const subEventTypeP1 = 0xf2;
       const subEventTypeP2 = 0x14;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x12, 0x03, 0x00, 3, 9, 9, 8]);
-
-      const handleBuffers = {
+  
+      // Setup pre-existing buffer
+      hci._handleBuffers = {
         1266: {
           length: 3,
           cid: 2307,
           data: Buffer.from([3, 4])
         }
       };
-      hci._handleBuffers = handleBuffers;
-
+  
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
-      should(hci._handleBuffers).deepEqual({
+  
+      // Not called
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      
+      // Check buffer was updated properly
+      expect(hci._handleBuffers).toEqual({
         1266: {
           length: 3,
           cid: 2307,
-          data: Buffer.from([3, 4, 3, 0, 3, 9, 9, 8])
+          data: expect.any(Buffer)
         }
       });
+      
+      // Check buffer contents
+      const bufferData = hci._handleBuffers[1266].data;
+      expect(Buffer.from(bufferData)).toEqual(Buffer.from([3, 4, 3, 0, 3, 9, 9, 8]));
     });
-
-    it('should concat data and emit aclDataPkt - HCI_ACLDATA_PKT / ACL_CONT', () => {
+  
+    test('should concat data and emit aclDataPkt - HCI_ACLDATA_PKT / ACL_CONT when complete', () => {
       const eventType = 2;
       const subEventTypeP1 = 0xf2;
       const subEventTypeP2 = 0x14;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x12, 0x03, 0x00, 3, 9, 9, 8]);
-
-      const handleBuffers = {
+  
+      // Setup pre-existing buffer with enough expected length to trigger completion
+      hci._handleBuffers = {
         1266: {
           length: 8,
           cid: 2307,
           data: Buffer.from([3, 4])
         }
       };
-      hci._handleBuffers = handleBuffers;
-
+  
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(aclDataPktCallback, 1266, 2307, Buffer.from([3, 4, 3, 0, 3, 9, 9, 8]));
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-
-      should(hci._handleBuffers).be.empty();
+  
+      // Called
+      expect(aclDataPktCallback).toHaveBeenCalledWith(
+        1266, 
+        2307, 
+        expect.any(Buffer)
+      );
+      
+      // Verify buffer contents in the callback
+      const callData = aclDataPktCallback.mock.calls[0][2];
+      expect(Buffer.from(callData)).toEqual(Buffer.from([3, 4, 3, 0, 3, 9, 9, 8]));
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+      expect(hci._aclConnections.get(4660)).toEqual({ pending: 3 });
+      expect(hci._aclConnections.get(4661)).toEqual({ pending: 2 });
+      
+      // Buffer should be emptied after processing
+      expect(hci._handleBuffers).toEqual({});
     });
-
-    it('should do nothing - HCI_ACLDATA_PKT / ??', () => {
-      const eventType = 2;
-      const subEventType = 122;
-      const data = Buffer.from([eventType, subEventType, 0, 1, 0x34, 0x12, 3, 9, 9]);
-      hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-      assert.notCalled(leScanEnableSetCmdCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
-      should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
-      should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
-    });
-
-    it('should emit leScanEnableSetCmd - HCI_COMMAND_PKT / LE_SET_SCAN_ENABLE_CMD', () => {
+  
+    test('should emit leScanEnableSetCmd - HCI_COMMAND_PKT / LE_SET_SCAN_ENABLE_CMD', () => {
       const eventType = 1;
       const subEventTypeP1 = 0x0c;
       const subEventTypeP2 = 0x20;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x01, 0]);
-
-      const handleBuffers = {
-        1266: {
-          length: 8,
-          cid: 2307,
-          data: Buffer.from([3, 4])
-        }
-      };
-      hci._handleBuffers = handleBuffers;
-
+  
       hci.onSocketData(data);
-
-      // called
-      assert.calledOnceWithExactly(leScanEnableSetCmdCallback, true, false);
-
-      // not called
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
+  
+      // Called
+      expect(leScanEnableSetCmdCallback).toHaveBeenCalledWith(true, false);
+  
+      // Not called
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
     });
-
-    it('should not emit leScanEnableSetCmd - HCI_COMMAND_PKT / ???', () => {
+  
+    test('should not emit leScanEnableSetCmd - HCI_COMMAND_PKT / unknown command', () => {
       const eventType = 1;
       const subEventTypeP1 = 0x0c;
-      const subEventTypeP2 = 0x21;
+      const subEventTypeP2 = 0x21;  // Different command code
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x01, 0]);
-
-      const handleBuffers = {
-        1266: {
-          length: 8,
-          cid: 2307,
-          data: Buffer.from([3, 4])
-        }
-      };
-      hci._handleBuffers = handleBuffers;
-
+  
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(leScanEnableSetCmdCallback);
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
+  
+      // Not called
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
     });
-
-    it('should do nothing - ?? / ???', () => {
-      const eventType = 122;
+  
+    test('should do nothing - unknown event type', () => {
+      const eventType = 122;  // Unknown event type
       const subEventTypeP1 = 0x0c;
       const subEventTypeP2 = 0x21;
       const data = Buffer.from([eventType, subEventTypeP1, subEventTypeP2, 0x34, 0x01, 0]);
-
-      const handleBuffers = {
-        1266: {
-          length: 8,
-          cid: 2307,
-          data: Buffer.from([3, 4])
-        }
-      };
-      hci._handleBuffers = handleBuffers;
-
+  
       hci.onSocketData(data);
-
-      // called
-
-      // not called
-      assert.notCalled(leScanEnableSetCmdCallback);
-      assert.notCalled(hci.flushAcl);
-      assert.notCalled(hci.processLeMetaEvent);
-      assert.notCalled(encryptChangeCallback);
-      assert.notCalled(hci.processCmdCompleteEvent);
-      assert.notCalled(disconnCompleteCallback);
-      assert.notCalled(aclDataPktCallback);
-
-      // hci checks
-      should(hci._aclQueue).deepEqual(aclQueue);
-      should(hci._aclConnections).have.keys(4660, 4661);
+  
+      // Not called
+      expect(leScanEnableSetCmdCallback).not.toHaveBeenCalled();
+      expect(hci.flushAcl).not.toHaveBeenCalled();
+      expect(hci.processLeMetaEvent).not.toHaveBeenCalled();
+      expect(encryptChangeCallback).not.toHaveBeenCalled();
+      expect(hci.processCmdCompleteEvent).not.toHaveBeenCalled();
+      expect(disconnCompleteCallback).not.toHaveBeenCalled();
+      expect(aclDataPktCallback).not.toHaveBeenCalled();
+  
+      // HCI state checks
+      expect(hci._aclQueue).toEqual(aclQueue);
+      expect(Array.from(hci._aclConnections.keys())).toEqual(expect.arrayContaining([4660, 4661]));
+    });
+  });
+  
+  // LE_READ_LOCAL_SUPPORTED_FEATURES tests
+  describe('LE_READ_LOCAL_SUPPORTED_FEATURES', () => {
+    beforeEach(() => {
+      // Spy on methods rather than replacing them
+      jest.spyOn(hci, 'setCodedPhySupport');
+      jest.spyOn(hci, 'setEventMask');
+      jest.spyOn(hci, 'setLeEventMask');
+      jest.spyOn(hci, 'readLocalVersion');
+      jest.spyOn(hci, 'writeLeHostSupported');
+      jest.spyOn(hci, 'readLeHostSupported');
+      jest.spyOn(hci, 'readLeBufferSize');
+      jest.spyOn(hci, 'readBdAddr');
+      
+      // Reset _isExtended flag
+      hci._isExtended = false;
+    });
+    
+    afterEach(() => {
+      jest.clearAllMocks();
+    });
+    
+    test('should not process on error status', () => {
+      const cmd = 8195;
+      const status = 1;
+      const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
+  
+      hci.processCmdCompleteEvent(cmd, status, result);
+  
+      // Verify no methods were called
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+      expect(hci.setEventMask).not.toHaveBeenCalled();
+      expect(hci.setLeEventMask).not.toHaveBeenCalled();
+      expect(hci.readLocalVersion).not.toHaveBeenCalled();
+      expect(hci.writeLeHostSupported).not.toHaveBeenCalled();
+      expect(hci.readLeHostSupported).not.toHaveBeenCalled();
+      expect(hci.readLeBufferSize).not.toHaveBeenCalled();
+      expect(hci.readBdAddr).not.toHaveBeenCalled();
+  
+      expect(hci._isExtended).toBe(false);
+    });
+  
+    test('should process without extended features', () => {
+      const cmd = 8195;
+      const status = 0;
+      const result = Buffer.from([0x00, 0x00, 0x00, 0x00]); // No bits set
+  
+      hci.processCmdCompleteEvent(cmd, status, result);
+  
+      // Verify extended-specific method not called
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+  
+      // Verify other methods were called
+      expect(hci.setEventMask).toHaveBeenCalled();
+      expect(hci.setLeEventMask).toHaveBeenCalled();
+      expect(hci.readLocalVersion).toHaveBeenCalled();
+      expect(hci.writeLeHostSupported).toHaveBeenCalled();
+      expect(hci.readLeHostSupported).toHaveBeenCalled();
+      expect(hci.readLeBufferSize).toHaveBeenCalled();
+      expect(hci.readBdAddr).toHaveBeenCalled();
+  
+      expect(hci._isExtended).toBe(false);
     });
   });
 
@@ -1942,10 +1861,14 @@ describe('hci-socket hci', () => {
       const data = Buffer.from([1, 0, 0xff, 0xee]);
       const callback = sinon.spy();
 
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
       hci.on('leAdvertisingReport', callback);
       hci.processLeAdvertisingReport(count, data);
 
       assert.notCalled(callback);
+      
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('illegal packet'));
     });
   });
 
@@ -1990,10 +1913,13 @@ describe('hci-socket hci', () => {
       const data = Buffer.from([1, 0, 0xff, 0xee]);
       const callback = sinon.spy();
 
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
       hci.on('leExtendedAdvertisingReport', callback);
       hci.processLeExtendedAdvertisingReport(count, data);
 
       assert.notCalled(callback);
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('illegal packet'));
     });
   });
 

@@ -67,7 +67,7 @@
     "semantic-release": "semantic-release",
     "pretest": "npm run rebuild",
     "rebuild": "node-gyp rebuild",
-    "test": "npx jest \"test/*.test.js\" \"test/**/*.test.js\""
+    "test": "npx jest"
   },
   "publishConfig": {
     "access": "public"

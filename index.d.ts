@@ -229,10 +229,6 @@ declare module '@stoprocent/noble' {
         once(event: string, listener: Function): this;
     }
 
-    /*
-    * Binding
-    */
-
     export type BindingType = 'default' | 'hci' | 'mac' | 'win';
 
     export interface BaseBindingsOptions {}
