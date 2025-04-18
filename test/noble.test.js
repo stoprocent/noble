@@ -329,6 +329,43 @@ describe('noble', () => {
       );
       expect(mockBindings.cancelConnect).toHaveBeenCalledTimes(1);
     });
+
+    test('should update peripheral state when cancelConnect is called during connection', () => {
+      // Setup a peripheral in connecting state
+      const peripheral = {
+        id: 'test-peripheral',
+        state: 'connecting',
+        emit: jest.fn()
+      };
+
+      noble._peripherals.set('test-peripheral', peripheral);
+      
+      // Mock addressToId to return the peripheral id
+      mockBindings.addressToId = jest.fn().mockReturnValue('test-peripheral');
+      
+      // Spy on noble's emit method
+      const emitSpy = jest.spyOn(noble, 'emit');
+      
+      // Call cancelConnect
+      noble.cancelConnect('test-peripheral');
+      
+      // Verify cancelConnect was called with correct parameters
+      expect(mockBindings.cancelConnect).toHaveBeenCalledWith(
+        'test-peripheral', 
+        undefined
+      );
+      
+      // Verify peripheral state was updated to disconnected
+      expect(peripheral.state).toBe('disconnected');
+      
+      // Verify connect event was emitted with error
+      expect(emitSpy).toHaveBeenCalledWith(
+        'connect:test-peripheral', 
+        expect.objectContaining({
+          message: 'connection canceled!'
+        })
+      );
+    });
   });
 
   test('should emit state', () => {
