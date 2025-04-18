@@ -54,8 +54,7 @@ async function main () {
     noble.on('discover', handleDiscovery);
     
   } catch (error) {
-    console.error('Error:', error);
-    process.exit(1);
+    throw new Error('Error:', error);
   }
 }
 
@@ -63,7 +62,8 @@ async function main () {
 const cleanup = async () => {
   console.log('\nCleaning up...');
   await noble.stopScanningAsync();
-  process.exit();
+  noble.stop();
+  console.log('noble stopped');
 };
 
 process.on('SIGINT', cleanup);

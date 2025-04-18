@@ -22,8 +22,7 @@ async function main () {
     await noble.startScanningAsync([ECHO_SERVICE_UUID], false);
     console.log('Scanning');
   } catch (error) {
-    console.error('Error initializing BLE:', error);
-    process.exit(1);
+    throw new Error('Error initializing BLE:', error);
   }
 }
 
@@ -83,7 +82,8 @@ async function connectAndSetUp (peripheral) {
 const cleanup = async () => {
   console.log('Caught interrupt signal');
   await noble.stopScanningAsync();
-  process.exit();
+  noble.stop();
+  console.log('noble stopped');
 };
 
 process.on('SIGINT', cleanup);

@@ -53,7 +53,8 @@ async function main () {
 const cleanup = async () => {
   console.log('Caught interrupt signal');
   await noble.stopScanningAsync();
-  process.exit();
+  noble.stop();
+  console.log('noble stopped');
 };
 
 process.on('SIGINT', cleanup);

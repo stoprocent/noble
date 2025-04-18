@@ -14,7 +14,7 @@ try {
 
 const starTime = Date.now();
 
-var peripheral;
+let peripheral;
 async function main () {
   try {
     await noble.waitForPoweredOnAsync();
@@ -31,8 +31,7 @@ async function main () {
       await noble.startScanningAsync([], false);
     }
   } catch (error) {
-    console.error('Error:', error);
-    process.exit(1);
+    throw new Error('Error:', error);
   }
 }
 
@@ -89,7 +88,8 @@ const explore = async (peripheral) => {
 
   peripheral.on('disconnect', (reason) => {
     console.log('Disconnected', reason);
-    process.exit(0);
+    noble.stop();
+    console.log('noble stopped');
   });
 
   if (peripheral.state !== 'connected') {
@@ -157,19 +157,16 @@ const explore = async (peripheral) => {
 
 };
 
-process.on('SIGINT', function () {
+// Handle process termination
+const cleanup = async () => {
   console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+  await noble.stopScanningAsync();
+  noble.stop();
+  console.log('noble stopped');
+};
 
-process.on('SIGQUIT', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
-
-process.on('SIGTERM', function () {
-  console.log('Caught interrupt signal');
-  noble.stopScanning(() => process.exit());
-});
+process.on('SIGINT', cleanup);
+process.on('SIGQUIT', cleanup);
+process.on('SIGTERM', cleanup);
 
 main();
