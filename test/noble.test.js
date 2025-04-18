@@ -380,6 +380,48 @@ describe('noble', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  describe('waitForPoweredOnAsync', () => {
+    test('should resolve when state changes to poweredOn', async () => {
+      // Set initial state to something other than poweredOn
+      noble._state = 'poweredOff';
+      
+      // Create promise but don't await it yet
+      const promise = noble.waitForPoweredOnAsync();
+      
+      // Emit state change event to poweredOn
+      noble.emit('stateChange', 'poweredOn');
+      
+      // Now await the promise - it should resolve
+      await expect(promise).resolves.toBeUndefined();
+    });
+    
+    test('should resolve immediately if state is already poweredOn', async () => {
+      // Set initial state to poweredOn
+      noble._state = 'poweredOn';
+      
+      // Multiple concurrent calls should resolve immediately
+      const promise1 = noble.waitForPoweredOnAsync();
+      const promise2 = noble.waitForPoweredOnAsync();
+      const promise3 = noble.waitForPoweredOnAsync();
+      
+      // Both promises should resolve
+      await expect(promise1).resolves.toBeUndefined();
+      await expect(promise2).resolves.toBeUndefined();
+      await expect(promise3).resolves.toBeUndefined();
+    });
+    
+    test('should reject if timeout occurs before state changes to poweredOn', async () => {
+      // Set initial state to something other than poweredOn
+      noble._state = 'poweredOff';
+      
+      // Set a very short timeout
+      const promise = noble.waitForPoweredOnAsync(10);
+      
+      // Promise should reject after timeout
+      await expect(promise).rejects.toThrow('Timeout waiting for Noble to be powered on');
+    });
+  });
+
   test('should change address', () => {
     const address = 'newAddress';
     noble._onAddressChange(address);

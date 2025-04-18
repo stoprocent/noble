@@ -33,7 +33,7 @@
     "node-gyp-build": "^4.8.1"
   },
   "optionalDependencies": {
-    "@stoprocent/bluetooth-hci-socket": "^2.1.1"
+    "@stoprocent/bluetooth-hci-socket": "^2.2.0"
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.27.0",
