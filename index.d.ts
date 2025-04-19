@@ -174,36 +174,37 @@ declare module '@stoprocent/noble' {
     
         readAsync(): Promise<Buffer>;
         writeAsync(data: Buffer, withoutResponse: boolean): Promise<void>;
-        broadcastAsync(broadcast: boolean): Promise<void>;
-        notifyAsync(notify: boolean): Promise<void>;
-        discoverDescriptorsAsync(): Promise<Descriptor[]>;
         subscribeAsync(): Promise<void>;
         unsubscribeAsync(): Promise<void>;
+        discoverDescriptorsAsync(): Promise<Descriptor[]>;
+        broadcastAsync(broadcast: boolean): Promise<void>;
+        
+        /**
+         * Async iterator for receiving notifications from the characteristic.
+         * Automatically handles subscription and cleanup when finished.
+         * @returns AsyncGenerator that yields notification data
+         */
+        notificationsAsync(): AsyncGenerator<Buffer, void, unknown>;
         
         read(callback?: (error: Error | undefined, data: Buffer) => void): void;
         write(data: Buffer, withoutResponse: boolean, callback?: (error: Error | undefined) => void): void;
-        broadcast(broadcast: boolean, callback?: (error: Error | undefined) => void): void;
-        notify(notify: boolean, callback?: (error: Error | undefined) => void): void;
-        discoverDescriptors(callback?: (error: Error | undefined, descriptors: Descriptor[]) => void): void;
         subscribe(callback?: (error: Error | undefined) => void): void;
         unsubscribe(callback?: (error: Error | undefined) => void): void;
+        discoverDescriptors(callback?: (error: Error | undefined, descriptors: Descriptor[]) => void): void;
+        broadcast(broadcast: boolean, callback?: (error: Error | undefined) => void): void;
         
         toString(): string;
         
-        on(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
-        on(event: "write", withoutResponse: boolean, listener: (error: Error | undefined) => void): this;
-        on(event: "broadcast", listener: (state: string) => void): this;
-        on(event: "notify", listener: (state: string) => void): this;
         on(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
+        on(event: "write", listener: (error: Error | undefined) => void): this;
         on(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
+        on(event: "broadcast", listener: (state: string) => void): this;
         on(event: string, listener: Function): this;
     
-        once(event: "read", listener: (data: Buffer, isNotification: boolean) => void): this;
-        once(event: "write", withoutResponse: boolean, listener: (error: Error | undefined) => void): this;
-        once(event: "broadcast", listener: (state: string) => void): this;
-        once(event: "notify", listener: (state: string) => void): this;
         once(event: "data", listener: (data: Buffer, isNotification: boolean) => void): this;
+        once(event: "write", listener: (error: Error | undefined) => void): this;
         once(event: "descriptorsDiscover", listener: (descriptors: Descriptor[]) => void): this;
+        once(event: "broadcast", listener: (state: string) => void): this;
         once(event: string, listener: Function): this;
     }
     

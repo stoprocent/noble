@@ -8,7 +8,7 @@ A Node.js BLE (Bluetooth Low Energy) central module.
 
 Want to implement a peripheral? Check out [@stoprocent/bleno](https://github.com/stoprocent/bleno).
 
-__NOTE__: Currently, running both noble (central) and bleno (peripheral) together only works with macOS bindings or when using separate HCI/UART dongles. Support for running both on a single HCI adapter (e.g., on Linux systems) will be added in future releases.
+> **Note:** Currently, running both noble (central) and bleno (peripheral) together only works with macOS bindings or when using separate HCI/UART dongles. Support for running both on a single HCI adapter (e.g., on Linux systems) will be added in future releases.
 
 ## About This Fork
 
@@ -360,6 +360,8 @@ const characteristics = await service.discoverCharacteristicsAsync([characterist
 
 ### Characteristic Methods
 
+> **Note:** The `data` event is the primary event for handling both read responses and notifications. When using the event-based approach, you can differentiate between read responses and notifications using the `isNotification` parameter. The previously used `read` event **has been deprecated and removed**. Instead, use the `data` event with `isNotification=false` to identify read responses.
+
 ```typescript
 // Read characteristic value
 const data = await characteristic.readAsync();
@@ -373,8 +375,32 @@ await characteristic.subscribeAsync();
 // Unsubscribe from notifications
 await characteristic.unsubscribeAsync();
 
+// Receive notifications using async iterator
+for await (const data of characteristic.notificationsAsync()) {
+  console.log(`Received notification: ${data}`);
+}
+
 // Discover descriptors
 const descriptors = await characteristic.discoverDescriptorsAsync();
+```
+
+### Characteristic Events
+
+```typescript
+// Receive data (both read responses and notifications)
+characteristic.on('data', (data: Buffer, isNotification: boolean) => {
+  console.log(`Received ${isNotification ? 'notification' : 'read response'}: ${data}`);
+});
+
+// Write completion 
+characteristic.on('write', (error: Error | undefined) => {
+  console.log('Write completed');
+});
+
+// Descriptor discovery
+characteristic.on('descriptorsDiscover', (descriptors: Descriptor[]) => {
+  console.log('Descriptors discovered');
+});
 ```
 
 ### Descriptor Methods
@@ -604,4 +630,4 @@ The following environment variables can configure noble's behavior:
 | BLUETOOTH_HCI_SOCKET_UART_PORT | UART port for HCI communication | none | `export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/ttyUSB0` |
 | BLUETOOTH_HCI_SOCKET_UART_BAUDRATE | UART baudrate | 1000000 | `export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000` |
 
-**Note:** The preferred method for configuration is now using the `withBindings()` API rather than environment variables.
+> **Note:** The preferred method for configuration is now using the `withBindings()` API rather than environment variables.

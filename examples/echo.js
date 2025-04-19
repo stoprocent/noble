@@ -48,34 +48,32 @@ async function connectAndSetUp (peripheral) {
     console.log('Discovered services and characteristics');
     const echoCharacteristic = characteristics[0];
 
-    // data callback receives notifications
-    echoCharacteristic.on('read', (data, isNotification) => {
-      console.log(`Received: "${data}"`);
-    });
-
-    // subscribe to be notified whenever the peripheral update the characteristic
-    try {
-      await echoCharacteristic.subscribeAsync();
-      console.log('Subscribed for echoCharacteristic notifications');
-    } catch (error) {
-      console.error('Error subscribing to echoCharacteristic:', error);
-      return;
-    }
-
     // create an interval to send data to the service
     let count = 0;
-    setInterval(async () => {
+    const interval = setInterval(async () => {
       count++;
       const message = Buffer.from(`hello, ble ${count}`, 'utf-8');
       console.log(`Sending:  '${message}'`);
       await echoCharacteristic.writeAsync(message, false);
-    }, 2500);
+    }, 500);
+
+    // subscribe to be notified whenever the peripheral update the characteristic
+    try {
+      for await (const data of echoCharacteristic.notificationsAsync()) {
+        console.log(`Received: "${data}"`);
+        if (count >= 15) {
+          break;
+        }
+      }
+    } finally {
+      clearInterval(interval);
+      await peripheral.disconnectAsync();
+      noble.stop();
+    }
 
   } catch (error) {
     console.error('Error during connection setup:', error);
   }
-
-  peripheral.on('disconnect', () => console.log('disconnected'));
 }
 
 // Handle process termination
