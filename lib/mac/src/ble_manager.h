@@ -11,6 +11,7 @@
     bool pendingRead;
 }
 @property (strong) CBCentralManager *centralManager;
+@property (assign) CBManagerState lastState;
 @property dispatch_queue_t dispatchQueue;
 @property NSMutableDictionary *peripherals;
 @property NSMutableSet *discovered;

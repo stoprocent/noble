@@ -22,6 +22,15 @@
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central 
 {
+    if (central.state != self.lastState && self.lastState == CBManagerStatePoweredOff && central.state == CBManagerStatePoweredOn) {
+        [self.peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL *stop) {
+            if (peripheral.state == CBPeripheralStateConnected) {
+                [self.centralManager cancelPeripheralConnection:peripheral];
+            }
+        }];
+    }
+
+    self.lastState = central.state;
     auto state = stateToString(central.state);
     emit.RadioState(state);
 }
@@ -142,6 +151,7 @@
         // Simulate discovery handling
         [self centralManager:central didDiscoverPeripheral:peripheral advertisementData:advertisementData RSSI:RSSI];
     }
+    
     std::string uuid = getUuid(peripheral);
     emit.Connected(uuid, "");
 }
