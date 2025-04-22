@@ -239,7 +239,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql({ addressType: 'public' });
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('11:22:33:44:55:66', 'public', { addressType: 'public' });
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('11:22:33:44:55:66', 'public', { addressType: 'public' }, true);
     });
 
     it('missing peripheral, no queue, random address', () => {
@@ -252,7 +252,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql({ addressType: 'random' });
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('f3:22:33:44:55:66', 'random', { addressType: 'random' });
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('f3:22:33:44:55:66', 'random', { addressType: 'random' }, true);
     });
 
     it('existing peripheral, no queue', () => {
@@ -271,7 +271,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql('parameters');
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('address', 'addressType', 'parameters');
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('address', 'addressType', 'parameters', true);
     });
 
     it('missing peripheral, with queue', () => {
@@ -801,8 +801,8 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledTimes(1);
       expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' });
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' });
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
 
       should(bindings._connectionQueue).length(1);
     });
@@ -822,14 +822,16 @@ describe('hci-socket bindings', () => {
       bindings.connect('queuedId_2', { addressType: 'public' });
       bindings.connect('queuedId_3', { addressType: 'random' });
 
+      bindings.emit('reset');
+
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
       expect(connectCallback).toHaveBeenCalledTimes(1);
       expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' });
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' });
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
       expect(bindings._connectionQueue).toHaveLength(2);
     });
 
@@ -865,9 +867,9 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledWith('998877665544', null);
 
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(3);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' });
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' });
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('aabbccddeeff', 'random', { addressType: 'random' });
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('aabbccddeeff', 'random', { addressType: 'random' }, false);
       expect(bindings._connectionQueue).toHaveLength(1);
     });
   });
