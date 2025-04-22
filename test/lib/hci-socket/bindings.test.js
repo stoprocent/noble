@@ -216,7 +216,7 @@ describe('hci-socket bindings', () => {
 
       bindings.stopScanning();
 
-      expect(bindings._gap.stopScanning).not.toHaveBeenCalled();
+      expect(bindings._gap.stopScanning).toHaveBeenCalledTimes(1);
       expect(scanStopSpy).toHaveBeenCalledTimes(1);
     });
   });
