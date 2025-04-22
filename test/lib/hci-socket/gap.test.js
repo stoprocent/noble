@@ -45,12 +45,29 @@ describe('hci-socket gap', () => {
   it('startScanning', () => {
     const hci = {
       on: sinon.spy(),
+      once: sinon.spy(),
+      reset: sinon.spy(),
       setScanEnabled: sinon.spy(),
       setScanParameters: sinon.spy()
     };
 
     const gap = new Gap(hci);
     gap.startScanning(true);
+
+    assert.callCount(hci.once, 1);
+    assert.calledWithExactly(hci.reset);
+  });
+
+  it('startScanningAfterReset', () => {
+    const hci = {
+      on: sinon.spy(),
+      once: sinon.spy(),
+      setScanEnabled: sinon.spy(),
+      setScanParameters: sinon.spy()
+    };
+
+    const gap = new Gap(hci);
+    gap.startScanningAfterReset(true);
 
     should(gap._scanState).equal('starting');
     should(gap._scanFilterDuplicates).equal(false);
