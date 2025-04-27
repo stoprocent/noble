@@ -5,6 +5,7 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Security.Cryptography.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 
 
 using winrt::Windows::Devices::Bluetooth::BluetoothCacheMode;
@@ -17,6 +18,7 @@ using winrt::Windows::Storage::Streams::IBuffer;
 using winrt::Windows::Storage::Streams::ByteOrder;
 using winrt::Windows::Security::Cryptography::CryptographicBuffer;
 using winrt::Windows::Devices::Bluetooth::Advertisement::BluetoothLEAdvertisementBytePattern;
+using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattSession;
 
 template <typename T> auto inFilter(std::vector<T> filter, T object)
 {
@@ -324,6 +326,10 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
             peripheral.device = device;
             peripheral.connectionToken = token;
             mEmit.Connected(uuid);
+            
+            // Get GATT session to access the MTU
+            auto completed = bind2(this, &BLEManager::OnGattSessionCreated, uuid);
+            GattSession::FromDeviceIdAsync(device.BluetoothDeviceId()).Completed(completed);
         }
         else
         {
@@ -334,6 +340,46 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
     {
         mEmit.Connected(uuid, "could not connect to device");
     }
+}
+
+void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, AsyncStatus status, const std::string uuid)
+{
+    if (status == AsyncStatus::Completed)
+    {
+        auto session = asyncOp.GetResults();
+        if (session)
+        {
+            // MaxPduSize is equivalent to the MTU-3 (MTU minus ATT header)
+            // MTU = MaxPduSize + 3
+            int mtu = session.MaxPduSize();
+            mEmit.MTU(uuid, mtu);
+            
+            // Subscribe to MTU changes
+            auto onPduSizeChanged = bind2(this, &BLEManager::OnMaxPduSizeChanged, uuid);
+            
+            // Store both the session and the event token in the peripheral
+            PeripheralWinrt& peripheral = mDeviceMap[uuid];
+            peripheral.gattSession = session;
+            auto token = session.MaxPduSizeChanged(onPduSizeChanged);
+            peripheral.maxPduSizeChangedToken = token;
+        }
+        else
+        {
+            LOGE("Failed to get GattSession for device %s", uuid.c_str());
+        }
+    }
+    else
+    {
+        LOGE("Failed to create GattSession: %s", asyncStatusToString(status).c_str());
+    }
+}
+
+// Add this new method to handle the MaxPduSizeChanged event
+void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Foundation::IInspectable object, const std::string uuid)
+{
+    // Update MTU value when it changes
+    int mtu = session.MaxPduSize();
+    mEmit.MTU(uuid, mtu);
 }
 
 bool BLEManager::Disconnect(const std::string& uuid)

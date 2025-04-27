@@ -163,6 +163,10 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
 void PeripheralWinrt::Disconnect()
 {
     cachedServices.clear();
+    if (gattSession.has_value() && maxPduSizeChangedToken)
+    {
+        gattSession->MaxPduSizeChanged(maxPduSizeChangedToken);
+    }
     if (device.has_value() && connectionToken)
     {
         device->Close();
