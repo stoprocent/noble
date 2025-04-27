@@ -4,6 +4,10 @@
 
 #import <Foundation/Foundation.h>
 
+@interface BLEManager ()
+- (void)updateMtuForPeripheral:(CBPeripheral*) peripheral;
+@end
+
 @implementation BLEManager
 
 - (instancetype)init: (const Napi::Value&) receiver with: (const Napi::Function&) callback
@@ -16,8 +20,18 @@
         self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:self.dispatchQueue];
         self.discovered = [NSMutableSet set];
         self.peripherals = [NSMutableDictionary dictionaryWithCapacity:10];
+        self.mtus = [NSMutableDictionary dictionaryWithCapacity:10];
     }
     return self;
+}
+
+- (void)updateMtuForPeripheral:(CBPeripheral*) peripheral {
+    NSUInteger mtu = [peripheral maximumWriteValueLengthForType:CBCharacteristicWriteWithoutResponse];
+    NSNumber *mtuNumber = [self.mtus objectForKey: peripheral.identifier];
+    if (!mtuNumber || [mtuNumber unsignedIntegerValue] != mtu) {
+        emit.MTU(getUuid(peripheral), mtu);
+        [self.mtus setObject:[NSNumber numberWithInt:mtu] forKey: peripheral.identifier];
+    }
 }
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central 
@@ -154,6 +168,8 @@
     
     std::string uuid = getUuid(peripheral);
     emit.Connected(uuid, "");
+    [self updateMtuForPeripheral:peripheral];
+    
 }
 
 - (void) centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
@@ -213,6 +229,7 @@
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
     std::string uuid = getUuid(peripheral);
     std::vector<std::string> services = getServices(peripheral.services);
+    [self updateMtuForPeripheral:peripheral];
     emit.ServicesDiscovered(uuid, services, error ? error.localizedDescription.UTF8String : "");
 }
 
@@ -263,6 +280,7 @@
     std::string uuid = getUuid(peripheral);
     std::string serviceUuid = std::string([service.UUID.UUIDString UTF8String]);
     auto characteristics = getCharacteristics(service.characteristics);
+    [self updateMtuForPeripheral:peripheral];
     emit.CharacteristicsDiscovered(uuid, serviceUuid, characteristics, error ? error.localizedDescription.UTF8String : "");
 }
 

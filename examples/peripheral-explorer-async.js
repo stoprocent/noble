@@ -13,6 +13,7 @@ try {
 }
 
 const starTime = Date.now();
+let cancelConnectTimeout;
 
 let peripheral;
 async function main () {
@@ -20,12 +21,13 @@ async function main () {
     await noble.waitForPoweredOnAsync();
 
     // Cancel the connection after 5 seconds if it is still connecting
-    setTimeout(() => {
+    cancelConnectTimeout = setTimeout(() => {
       noble.cancelConnect(peripheralIdOrAddress);
     }, 5000);
 
     if (directConnect === '1') {
       peripheral = await noble.connectAsync(peripheralIdOrAddress, { addressType });
+      clearTimeout(cancelConnectTimeout);
       await explore(peripheral);
     } else {
       await noble.startScanningAsync([], false);
@@ -92,13 +94,18 @@ const explore = async (peripheral) => {
     console.log('noble stopped');
   });
 
+  peripheral.on('mtu', (mtu) => {
+    console.log('MTU Updated: ', mtu);
+  });
+
   if (peripheral.state !== 'connected') {
     await peripheral.connectAsync();
+    clearTimeout(cancelConnectTimeout);
   }
 
   const rssi = await peripheral.updateRssiAsync();
   console.log('RSSI', rssi);
-
+   
   const services = await peripheral.discoverServicesAsync([]);
 
   for (const service of services) {

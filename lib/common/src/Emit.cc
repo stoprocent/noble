@@ -162,6 +162,14 @@ void Emit::Disconnected(const std::string& uuid)
     });
 }
 
+void Emit::MTU(const std::string& uuid, int mtu)
+{
+    mCallback->call([uuid, mtu](Napi::Env env, std::vector<napi_value>& args) {
+        // emit('onMtu', deviceUuid, mtu);
+        args = { _s("onMtu"), _u(uuid), _n(mtu) };
+    });
+}
+
 void Emit::RSSI(const std::string& uuid, int rssi, const std::string& error)
 {
     mCallback->call([uuid, rssi, error](Napi::Env env, std::vector<napi_value>& args) {

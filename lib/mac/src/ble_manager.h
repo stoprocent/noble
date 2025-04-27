@@ -14,7 +14,9 @@
 @property (assign) CBManagerState lastState;
 @property dispatch_queue_t dispatchQueue;
 @property NSMutableDictionary *peripherals;
+@property NSMutableDictionary *mtus;
 @property NSMutableSet *discovered;
+
 
 - (instancetype)init: (const Napi::Value&) receiver with: (const Napi::Function&) callback;
 - (void)scan: (NSArray<NSString*> *)serviceUUIDs allowDuplicates: (BOOL)allowDuplicates;
