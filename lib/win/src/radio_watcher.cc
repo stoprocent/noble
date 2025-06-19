@@ -80,7 +80,7 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
             capabilities.centralRoleSupported = adapter.IsCentralRoleSupported();
 
             Radio bluetooth = nullptr;
-            if (radio.State() == RadioState::On && adapter.IsPeripheralRoleSupported()) {
+            if (radio.State() == RadioState::On && adapter.IsCentralRoleSupported()) {
                 bluetooth = radio;
             }
 
