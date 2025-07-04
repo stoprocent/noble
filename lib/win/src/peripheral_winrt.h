@@ -72,6 +72,7 @@ public:
     winrt::event_token connectionToken;
     std::optional<GattSession> gattSession;
     winrt::event_token maxPduSizeChangedToken;
+    std::unordered_map<winrt::guid, CachedService> cachedServices;
 
 private:
     void GetServiceFromDevice(winrt::guid serviceUuid,
@@ -82,6 +83,5 @@ private:
     void
     GetDescriptorFromCharacteristic(GattCharacteristic characteristic, winrt::guid descriptorUuid,
                                     std::function<void(std::optional<GattDescriptor>)> callback);
-    std::unordered_map<winrt::guid, CachedService> cachedServices;
     void ProcessServiceData(const BluetoothLEAdvertisementDataSection& ds, size_t uuidSize);
 };
