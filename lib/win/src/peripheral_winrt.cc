@@ -162,15 +162,27 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
 
 void PeripheralWinrt::Disconnect()
 {
-    cachedServices.clear();
-    if (gattSession.has_value() && maxPduSizeChangedToken)
+    //clean up to ensure disconnect from Windows
+    for(auto const& cachedService : cachedServices)
     {
-        gattSession->MaxPduSizeChanged(maxPduSizeChangedToken);
+        cachedService.second.service.Close();
     }
-    if (device.has_value() && connectionToken)
+    cachedServices.clear();
+    if (gattSession.has_value())
     {
+        if(maxPduSizeChangedToken)
+        {
+            gattSession->MaxPduSizeChanged(maxPduSizeChangedToken);
+        }
+        gattSession->Close();
+    }
+    if (device.has_value())
+    {
+        if(connectionToken)
+        {
+            device->ConnectionStatusChanged(connectionToken);
+        }
         device->Close();
-        device->ConnectionStatusChanged(connectionToken);
     }
     device = std::nullopt;
 }

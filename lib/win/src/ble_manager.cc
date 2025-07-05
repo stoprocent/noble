@@ -418,13 +418,6 @@ void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
             peripheral.Disconnect();
             mNotifyMap.Remove(uuid);
             mEmit.Disconnected(uuid);
-            //clean up to ensure disconnect from Windows
-            for(auto const& cachedService : peripheral.cachedServices)
-            {
-                cachedService.second.service.Close();
-            }
-            peripheral.gattSession.value().Close();
-            peripheral.device.value().Close();
         }
     }
 }
