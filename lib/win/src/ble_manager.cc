@@ -413,9 +413,12 @@ void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
             return;
         }
         PeripheralWinrt& peripheral = mDeviceMap[uuid];
-        peripheral.Disconnect();
-        mNotifyMap.Remove(uuid);
-        mEmit.Disconnected(uuid);
+        if(peripheral.device.has_value() && &(peripheral.device.value()) == &device )
+        {
+            peripheral.Disconnect();
+            mNotifyMap.Remove(uuid);
+            mEmit.Disconnected(uuid);
+        }
     }
 }
 
@@ -454,7 +457,7 @@ void BLEManager::OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> 
     };
 
     CHECK_STATUS_AND_RESULT(status, result, emit);
-
+    PeripheralWinrt& peripheral = mDeviceMap[uuid];
     FOR(service, result.Services())
     {
         auto id = service.Uuid();
@@ -462,6 +465,8 @@ void BLEManager::OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> 
         {
             serviceUuids.push_back(toStr(id));
         }
+        //remember for cleanup
+        peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
     }
     mEmit.ServicesDiscovered(uuid, serviceUuids);
 }
@@ -503,7 +508,7 @@ void BLEManager::OnIncludedServicesDiscovered(IAsyncOperation<GattDeviceServices
     };
 
     CHECK_STATUS_AND_RESULT(status, result, emit);
-    
+    PeripheralWinrt& peripheral = mDeviceMap[uuid];
     FOR(service, result.Services())
     {
         auto id = service.Uuid();
@@ -511,6 +516,8 @@ void BLEManager::OnIncludedServicesDiscovered(IAsyncOperation<GattDeviceServices
         {
             servicesUuids.push_back(toStr(id));
         }
+        //remember for cleanup
+        peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
     }
     mEmit.IncludedServicesDiscovered(uuid, serviceId, servicesUuids);
 }
@@ -552,7 +559,6 @@ void BLEManager::OnCharacteristicsDiscovered(IAsyncOperation<GattCharacteristics
     };
     
     CHECK_STATUS_AND_RESULT(status, result, emit);
-    
     FOR(characteristic, result.Characteristics())
     {
         auto id = characteristic.Uuid();
