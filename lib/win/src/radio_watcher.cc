@@ -80,22 +80,25 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
             capabilities.centralRoleSupported = adapter.IsCentralRoleSupported();
 
             Radio bluetooth = nullptr;
-            if (radio.State() == RadioState::On && adapter.IsCentralRoleSupported()) {
+            if(adapter.IsCentralRoleSupported())
+            {
+                // Always set up radio state monitoring for any radio (on or off)
                 bluetooth = radio;
-            }
-
-            if (!bluetooth || bluetooth != mRadio) {
-                if (bluetooth) {
-                    mRadioStateChangedRevoker.revoke();
-                    mRadioStateChangedRevoker = bluetooth.StateChanged(
-                        winrt::auto_revoke, 
-                        [this, capabilities](Radio radio, auto&&) { 
-                            radioStateChanged(radio, capabilities); 
-                        });
-                } else {
-                    mRadioStateChangedRevoker.revoke();
-                }
+                mRadioStateChangedRevoker.revoke();
+                mRadioStateChangedRevoker = radio.StateChanged(
+                    winrt::auto_revoke, 
+                    [this, capabilities](Radio radio, auto&&) { 
+                        Radio bluetooth = radio;
+                        radioStateChanged(bluetooth, capabilities); 
+                    });
                 
+                radioStateChanged(bluetooth, capabilities);
+                mRadio = bluetooth;
+                
+            }
+            else
+            {
+                mRadioStateChangedRevoker.revoke();
                 radioStateChanged(bluetooth, capabilities);
                 mRadio = bluetooth;
             }
