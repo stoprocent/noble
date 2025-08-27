@@ -420,6 +420,19 @@ describe('noble', () => {
       // Promise should reject after timeout
       await expect(promise).rejects.toThrow('Timeout waiting for Noble to be powered on');
     });
+
+    test('should not cause MaxListenersExceededWarning with multiple timeout calls', async () => {
+      noble._state = 'poweredOff';
+
+      const promises = [];
+      for (let i = 0; i < 11; i++) {
+        promises.push(noble.waitForPoweredOnAsync(0).catch(() => {}));
+      }
+      await Promise.all(promises);
+      const finalListenerCount = noble.listenerCount('stateChange');
+
+      expect(finalListenerCount).toBeLessThanOrEqual(1);
+    });
   });
 
   test('should change address', () => {
