@@ -439,7 +439,7 @@ describe('noble', () => {
       await expect(promise).rejects.toThrow('Timeout waiting for Noble to be powered on');
     });
 
-    test('should not cause MaxListenersExceededWarning with multiple timeout calls', async () => {
+    test('should not cause MaxListenersExceededWarning warnings with multiple timeout calls', async () => {
       noble._state = 'poweredOff';
 
       const promises = [];
