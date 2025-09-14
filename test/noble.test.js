@@ -184,6 +184,24 @@ describe('noble', () => {
       );
       expect(mockBindings.startScanning).not.toHaveBeenCalled();
     });
+
+    test('should not cause MaxListenersExceededWarning warnings after repeated unauthorized errors', async () => {
+      noble._state = 'unauthorized';
+
+      const promise = noble.waitForPoweredOnAsync(0);
+
+      for (let i = 0; i < 10; i++) {
+        try {
+          await noble.startScanningAsync([]);
+        } catch (error) {
+        }
+      }
+
+      const finalListenerCount = noble.listenerCount('stateChange');
+
+      await expect(promise).rejects.toThrow('Timeout waiting for Noble to be powered on');
+      expect(finalListenerCount).toBeLessThanOrEqual(1);
+    });
   });
 
   describe('stopScanning', () => {
@@ -421,7 +439,7 @@ describe('noble', () => {
       await expect(promise).rejects.toThrow('Timeout waiting for Noble to be powered on');
     });
 
-    test('should not cause MaxListenersExceededWarning with multiple timeout calls', async () => {
+    test('should not cause MaxListenersExceededWarning warnings with multiple timeout calls', async () => {
       noble._state = 'poweredOff';
 
       const promises = [];
