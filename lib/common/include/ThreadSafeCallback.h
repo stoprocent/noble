@@ -72,7 +72,9 @@ inline ThreadSafeCallback::~ThreadSafeCallback() {
 
 inline void ThreadSafeCallback::call(ArgumentFunction argFunction) {
     auto argFn = new ArgumentFunction(argFunction);
-    if (threadSafeFunction_.BlockingCall(argFn) != napi_ok) {
+    // Use NonBlockingCall to avoid hanging if environment is destroyed
+    // This will queue the callback but not block waiting for it
+    if (threadSafeFunction_.NonBlockingCall(argFn) != napi_ok) {
         delete argFn;
     }
 }
@@ -83,13 +85,50 @@ inline void ThreadSafeCallback::callJsCallback(
     Napi::Reference<Napi::Value>* context,
     ArgumentFunction* argFn) {
     
-    if (argFn != nullptr) {
+    if (argFn == nullptr) {
+        return;
+    }
+
+    // Check if environment and callback are valid before proceeding
+    if (env == nullptr || jsCallback == nullptr || context == nullptr) {
+        delete argFn;
+        return;
+    }
+
+    // Check if context reference is still valid
+    if (context->IsEmpty()) {
+        delete argFn;
+        return;
+    }
+    
+    try {
         ArgumentVector args;
         (*argFn)(env, args);
         delete argFn;
 
-        if (env != nullptr && jsCallback != nullptr) {
-            jsCallback.Call(context->Value(), args);
+        // Get the receiver value and check if it's valid
+        Napi::Value receiverValue = context->Value();
+        // Check if receiver value is null or undefined (invalid)
+        if (receiverValue.IsNull() || receiverValue.IsUndefined()) {
+            return;
         }
+
+        // Attempt to call the callback with error handling
+        // If the environment is being destroyed, this may fail
+        // Note: N-API errors don't throw C++ exceptions, so this won't catch
+        // napi_open_callback_scope failures, but it helps with other cases
+        try {
+            jsCallback.Call(receiverValue, args);
+        } catch (const std::exception&) {
+            // Silently ignore exceptions - environment might be destroyed
+        } catch (...) {
+            // Catch any other exceptions during callback execution
+        }
+    } catch (const std::exception&) {
+        // If argument building fails, just clean up
+        delete argFn;
+    } catch (...) {
+        // Catch any other exceptions and clean up
+        delete argFn;
     }
 }

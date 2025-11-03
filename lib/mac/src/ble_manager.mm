@@ -21,6 +21,27 @@
         self.discovered = [NSMutableSet set];
         self.peripherals = [NSMutableDictionary dictionaryWithCapacity:10];
         self.mtus = [NSMutableDictionary dictionaryWithCapacity:10];
+        
+        // Set up periodic state checking to handle sleep/wake cycles using GCD timer
+        // Check every 2 seconds for state changes on the same dispatch queue
+        self.stateCheckTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.dispatchQueue);
+        if (self.stateCheckTimer) {
+            dispatch_source_set_timer(self.stateCheckTimer, 
+                                    dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC),
+                                    2.0 * NSEC_PER_SEC, 
+                                    0.1 * NSEC_PER_SEC); // 100ms leeway
+            __weak typeof(self) weakSelf = self;
+            dispatch_source_set_event_handler(self.stateCheckTimer, ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (strongSelf) {
+                    CBManagerState currentState = strongSelf.centralManager.state;
+                    if (currentState != strongSelf.lastState) {
+                        [strongSelf centralManagerDidUpdateState:strongSelf.centralManager];
+                    }
+                }
+            });
+            dispatch_resume(self.stateCheckTimer);
+        }
     }
     return self;
 }
@@ -519,5 +540,12 @@
     return nil;
 }
 
-@end
+- (void)dealloc {
+    // Clean up GCD timer
+    if (self.stateCheckTimer) {
+        dispatch_source_cancel(self.stateCheckTimer);
+        self.stateCheckTimer = nil;
+    }
+}
 
+@end
