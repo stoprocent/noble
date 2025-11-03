@@ -16,6 +16,7 @@
 @property NSMutableDictionary *peripherals;
 @property NSMutableDictionary *mtus;
 @property NSMutableSet *discovered;
+@property (strong) dispatch_source_t stateCheckTimer;
 
 
 - (instancetype)init: (const Napi::Value&) receiver with: (const Napi::Function&) callback;
