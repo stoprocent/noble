@@ -932,4 +932,18 @@ describe('noble', () => {
       expect(peripheral.state).toBe('disconnected');
     });
   });
+
+  describe("_withDisconnectHandler", () => {
+    test("resolves operation result", async () => {
+      const promise = noble._withDisconnectHandler('peripheralUuid', () => Promise.resolve(1))
+      await expect(promise).resolves.toBe(1)
+    })
+
+    test("throws disconnect error if disconnected before resolve", async () => {
+      noble._peripherals.set('uuid', {emit: jest.fn()});
+      const promise = noble._withDisconnectHandler('uuid', () => Promise.resolve(1))
+      noble._onDisconnect('uuid')
+      await expect(promise).rejects.toThrow('Disconnected unknown')
+    })
+  })
 });
