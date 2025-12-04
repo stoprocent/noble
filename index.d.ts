@@ -122,14 +122,14 @@ declare module '@stoprocent/noble' {
         toString(): string;
     
         on(event: "connect", listener: (error: Error | undefined) => void): this;
-        on(event: "disconnect", listener: (error: Error | undefined) => void): this;
+        on(event: "disconnect", listener: (reason: string) => void): this;
         on(event: "rssiUpdate", listener: (rssi: number) => void): this;
         on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
         on(event: "mtu", listener: (mtu: number) => void): this;
         on(event: string, listener: Function): this;
     
         once(event: "connect", listener: (error: Error | undefined) => void): this;
-        once(event: "disconnect", listener: (error: Error | undefined) => void): this;
+        once(event: "disconnect", listener: (reason: string) => void): this;
         once(event: "rssiUpdate", listener: (rssi: number) => void): this;
         once(event: "servicesDiscover", listener: (services: Service[]) => void): this;
         once(event: string, listener: Function): this;
