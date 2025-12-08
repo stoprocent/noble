@@ -703,6 +703,11 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
                         mEmit.Notify(uuid, serviceId, characteristicId, true);
                         return;
                     }
+         
+                    auto onChanged = bind2(this, &BLEManager::OnValueChanged, uuid);
+                    auto token = characteristic->ValueChanged(onChanged);
+                    mNotifyMap.Add(uuid, *characteristic, token);
+
                     auto descriptorValue =
                         GetDescriptorValue(characteristic->CharacteristicProperties());
 
@@ -750,18 +755,16 @@ void BLEManager::OnNotify(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus 
 {
     if (status == AsyncStatus::Completed)
     {
-        if (state == true)
-        {
-            auto onChanged = bind2(this, &BLEManager::OnValueChanged, uuid);
-            auto token = characteristic.ValueChanged(onChanged);
-            mNotifyMap.Add(uuid, characteristic, token);
-        }
         mEmit.Notify(uuid, serviceId, characteristicId, state);
     }
     else
     {
         std::string error = "status: " + std::to_string((int)status);
         mEmit.Notify(uuid, serviceId, characteristicId, state, error);
+        if (state == true)
+        {
+            mNotifyMap.Unsubscribe(uuid, characteristic);
+        }
     }
 }
 
