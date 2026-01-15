@@ -579,10 +579,10 @@ bool BLEManager::Read(const std::string& uuid, const winrt::guid& serviceUuid,
     {
         peripheral.GetCharacteristic(
             serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
+                std::string serviceId = toStr(serviceUuid);
+                std::string characteristicId = toStr(characteristicUuid);
                 if (characteristic)
                 {
-                    std::string serviceId = toStr(serviceUuid);
-                    std::string characteristicId = toStr(characteristicUuid);
                     characteristic->ReadValueAsync(BluetoothCacheMode::Uncached)
                         .Completed(
                             bind2(this, &BLEManager::OnRead, uuid, serviceId, characteristicId));
@@ -590,6 +590,7 @@ bool BLEManager::Read(const std::string& uuid, const winrt::guid& serviceUuid,
                 else
                 {
                     LOGE("GetCharacteristic error");
+                    mEmit.Read(uuid, serviceId, characteristicId, Data(), false, "GetCharacteristic error");
                 }
             });
         return true;
@@ -631,10 +632,10 @@ bool BLEManager::Write(const std::string& uuid, const winrt::guid& serviceUuid,
     {
         peripheral.GetCharacteristic(
             serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
+                std::string serviceId = toStr(serviceUuid);
+                std::string characteristicId = toStr(characteristicUuid);
                 if (characteristic)
                 {
-                    std::string serviceId = toStr(serviceUuid);
-                    std::string characteristicId = toStr(characteristicUuid);
                     auto writer = DataWriter();
                     writer.WriteBytes(data);
                     auto value = writer.DetachBuffer();
@@ -647,6 +648,7 @@ bool BLEManager::Write(const std::string& uuid, const winrt::guid& serviceUuid,
                 else
                 {
                     LOGE("GetCharacteristic error");
+                    mEmit.Write(uuid, serviceId, characteristicId, "GetCharacteristic error");
                 }
             });
         return true;
@@ -689,10 +691,10 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
     IFDEVICE(device, uuid)
     {
         auto onCharacteristic = [=](std::optional<GattCharacteristic> characteristic) {
+            std::string serviceId = toStr(serviceUuid);
+            std::string characteristicId = toStr(characteristicUuid);
             if (characteristic)
             {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
                 bool subscribed = mNotifyMap.IsSubscribed(uuid, *characteristic);
 
                 if (on)
@@ -703,7 +705,7 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
                         mEmit.Notify(uuid, serviceId, characteristicId, true);
                         return;
                     }
-         
+
                     auto onChanged = bind2(this, &BLEManager::OnValueChanged, uuid);
                     auto token = characteristic->ValueChanged(onChanged);
                     mNotifyMap.Add(uuid, *characteristic, token);
@@ -741,6 +743,7 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
             else
             {
                 LOGE("GetCharacteristic error");
+                mEmit.Notify(uuid, serviceId, characteristicId, on, "GetCharacteristic error");
             }
         };
         peripheral.GetCharacteristic(serviceUuid, characteristicUuid, onCharacteristic);
@@ -787,10 +790,10 @@ bool BLEManager::DiscoverDescriptors(const std::string& uuid, const winrt::guid&
     {
         peripheral.GetCharacteristic(
             serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
+                std::string serviceId = toStr(serviceUuid);
+                std::string characteristicId = toStr(characteristicUuid);
                 if (characteristic)
                 {
-                    std::string serviceId = toStr(serviceUuid);
-                    std::string characteristicId = toStr(characteristicUuid);
                     auto completed = bind2(this, &BLEManager::OnDescriptorsDiscovered, uuid,
                                            serviceId, characteristicId);
                     characteristic->GetDescriptorsAsync(BluetoothCacheMode::Uncached)
@@ -799,6 +802,8 @@ bool BLEManager::DiscoverDescriptors(const std::string& uuid, const winrt::guid&
                 else
                 {
                     LOGE("GetCharacteristic error");
+                    std::vector<std::string> emptyDescriptors;
+                    mEmit.DescriptorsDiscovered(uuid, serviceId, characteristicId, emptyDescriptors, "GetCharacteristic error");
                 }
             });
         return true;
@@ -836,11 +841,11 @@ bool BLEManager::ReadValue(const std::string& uuid, const winrt::guid& serviceUu
         peripheral.GetDescriptor(
             serviceUuid, characteristicUuid, descriptorUuid,
             [=](std::optional<GattDescriptor> descriptor) {
+                std::string serviceId = toStr(serviceUuid);
+                std::string characteristicId = toStr(characteristicUuid);
+                std::string descriptorId = toStr(descriptorUuid);
                 if (descriptor)
                 {
-                    std::string serviceId = toStr(serviceUuid);
-                    std::string characteristicId = toStr(characteristicUuid);
-                    std::string descriptorId = toStr(descriptorUuid);
                     auto completed = bind2(this, &BLEManager::OnReadValue, uuid, serviceId,
                                            characteristicId, descriptorId);
                     descriptor->ReadValueAsync(BluetoothCacheMode::Uncached).Completed(completed);
@@ -848,6 +853,7 @@ bool BLEManager::ReadValue(const std::string& uuid, const winrt::guid& serviceUu
                 else
                 {
                     LOGE("descriptor not found");
+                    mEmit.ReadValue(uuid, serviceId, characteristicId, descriptorId, Data(), "descriptor not found");
                 }
             });
         return true;
@@ -888,11 +894,11 @@ bool BLEManager::WriteValue(const std::string& uuid, const winrt::guid& serviceU
     IFDEVICE(device, uuid)
     {
         auto onDescriptor = [=](std::optional<GattDescriptor> descriptor) {
+            std::string serviceId = toStr(serviceUuid);
+            std::string characteristicId = toStr(characteristicUuid);
+            std::string descriptorId = toStr(descriptorUuid);
             if (descriptor)
             {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
-                std::string descriptorId = toStr(descriptorUuid);
                 auto writer = DataWriter();
                 writer.WriteBytes(data);
                 auto value = writer.DetachBuffer();
@@ -903,6 +909,7 @@ bool BLEManager::WriteValue(const std::string& uuid, const winrt::guid& serviceU
             else
             {
                 LOGE("descriptor not found");
+                mEmit.WriteValue(uuid, serviceId, characteristicId, descriptorId, "descriptor not found");
             }
         };
         peripheral.GetDescriptor(serviceUuid, characteristicUuid, descriptorUuid, onDescriptor);
