@@ -92,16 +92,21 @@ void PeripheralWinrt::ProcessServiceData(const BluetoothLEAdvertisementDataSecti
     dr.Close();
 }
 
+static std::string advSectionToString(const winrt::Windows::Devices::Bluetooth::Advertisement::BluetoothLEAdvertisementDataSection &sec)
+{
+    std::string result;
+    result.resize(sec.Data().Length());
+    auto reader = DataReader::FromBuffer(sec.Data());
+    reader.ReadBytes(winrt::array_view<uint8_t>(
+        reinterpret_cast<uint8_t*>(result.data()), 
+        reinterpret_cast<uint8_t*>(result.data() + result.size())
+    ));
+    return result;
+}
+
 void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement& advertisment,
                              const BluetoothLEAdvertisementType& advertismentType)
 {
-    // Handle name
-    std::string localName = ws2s(advertisment.LocalName().c_str());
-    if (!localName.empty())
-    {
-        name = std::optional<std::string>(localName);
-    }
-
     connectable = advertismentType == BluetoothLEAdvertisementType::ConnectableUndirected ||
         advertismentType == BluetoothLEAdvertisementType::ConnectableDirected;
 
@@ -143,6 +148,18 @@ void PeripheralWinrt::Update(const int rssiValue, const BluetoothLEAdvertisement
         else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ServiceData128BitUuids())
         {
             ProcessServiceData(ds, 16);  // 16 bytes for 128-bit UUID
+        }
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::ShortenedLocalName())
+        {
+            if (!nameIsComplete)
+            {
+                name = advSectionToString(ds); // use shortened local name if no complete name is available
+            }
+        }
+        else if (ds.DataType() == BluetoothLEAdvertisementDataTypes::CompleteLocalName())
+        {
+            name = advSectionToString(ds);
+            nameIsComplete = true; // set the flag to ignore shortened local names
         }
     }
 

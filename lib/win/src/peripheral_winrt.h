@@ -73,6 +73,7 @@ public:
     std::optional<GattSession> gattSession;
     winrt::event_token maxPduSizeChangedToken;
     std::unordered_map<winrt::guid, CachedService> cachedServices;
+    bool nameIsComplete { false }; // `name` is the Complete Local Name
 
 private:
     void GetServiceFromDevice(winrt::guid serviceUuid,
