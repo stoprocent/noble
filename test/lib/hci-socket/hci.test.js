@@ -1891,8 +1891,12 @@ describe('hci-socket hci', () => {
   describe('processLeExtendedAdvertisingReport', () => {
     it('should emit without error', () => {
       const count = 2;
-      const data1 = Buffer.from([0, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0]);
-      const data2 = Buffer.from([1, 0, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 4, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
+      const eir1 = Buffer.from([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]);
+      const header1 = Buffer.from([0, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, eir1.length]);
+      const data1 = Buffer.concat([header1, eir1]);
+      const eir2 = Buffer.from([0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27]);
+      const header2 = Buffer.from([1, 0, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 4, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, eir2.length]);
+      const data2 = Buffer.concat([header2, eir2]);
       const data = Buffer.concat([data1, data2]);
       const callback = sinon.spy();
 
@@ -1904,7 +1908,9 @@ describe('hci-socket hci', () => {
 
     it('should emit only once with random address', () => {
       const count = 1;
-      const data = Buffer.from([0, 1, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+      const eir = Buffer.from([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]);
+      const header = Buffer.from([0, 1, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, eir.length]);
+      const data = Buffer.concat([header, eir]);
       const callback = sinon.spy();
 
       hci.on('leExtendedAdvertisingReport', callback);
@@ -1915,7 +1921,9 @@ describe('hci-socket hci', () => {
 
     it('should emit only once with public address', () => {
       const count = 1;
-      const data = Buffer.from([0, 1, 2, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+      const eir = Buffer.from([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]);
+      const header = Buffer.from([0, 1, 2, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, eir.length]);
+      const data = Buffer.concat([header, eir]);
       const callback = sinon.spy();
 
       hci.on('leExtendedAdvertisingReport', callback);
@@ -1936,6 +1944,41 @@ describe('hci-socket hci', () => {
 
       assert.notCalled(callback);
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('illegal packet'));
+    });
+
+    it('should ignore too-short extended report without throwing', () => {
+      const count = 1;
+      const data = Buffer.alloc(10);
+      const callback = sinon.spy();
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      hci.on('leExtendedAdvertisingReport', callback);
+      hci.processLeExtendedAdvertisingReport(count, data);
+
+      assert.notCalled(callback);
+      expect(consoleSpy.mock.calls.some((call) => String(call[0]).includes('too short'))).toBe(true);
+      consoleSpy.mockRestore();
+    });
+
+    it('should ignore extended report with oversized eir length', () => {
+      const count = 1;
+      const data = Buffer.from([
+        0, 1, 2, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa,
+        2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        200, // eirLength larger than remaining bytes
+        0x01, 0x02, 0x03,
+      ]);
+      const callback = sinon.spy();
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      hci.on('leExtendedAdvertisingReport', callback);
+      hci.processLeExtendedAdvertisingReport(count, data);
+
+      assert.notCalled(callback);
+      expect(consoleSpy.mock.calls.some((call) => String(call[0]).includes('eir length'))).toBe(true);
+      consoleSpy.mockRestore();
     });
   });
 
