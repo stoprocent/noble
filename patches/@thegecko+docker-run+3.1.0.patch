@@ -1,0 +1,13 @@
+diff --git a/node_modules/@thegecko/docker-run/index.js b/node_modules/@thegecko/docker-run/index.js
+index 5299bee..4de15b3 100644
+--- a/node_modules/@thegecko/docker-run/index.js
++++ b/node_modules/@thegecko/docker-run/index.js
+@@ -14,7 +14,7 @@ var endsWith = function(str, suffix) {
+ var run = function(image, opts) {
+   if (!opts) opts = {}
+ 
+-  var request = docker({host: opts.host, version: opts.version || 'v1.21'})
++  var request = docker({host: opts.host, version: opts.version || 'v1.44'})
+   var that = new events.EventEmitter()
+   var tty = !!opts.tty
+ 

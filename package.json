@@ -30,7 +30,8 @@
   "dependencies": {
     "debug": "^4.3.7",
     "node-addon-api": "^8.1.0",
-    "node-gyp-build": "^4.8.1"
+    "node-gyp-build": "^4.8.1",
+    "patch-package": "^8.0.0"
   },
   "optionalDependencies": {
     "@stoprocent/bluetooth-hci-socket": "^2.2.3"
@@ -67,7 +68,7 @@
     "lint": "eslint \"**/*.js\"",
     "lint-fix": "eslint \"**/*.js\" --fix",
     "prebuildify": "prebuildify --napi --target 17.0.0 --force --strip --verbose",
-    "prebuildify-cross": "prebuildify-cross --napi --target 17.0.0 --force --strip --verbose",
+    "prebuildify-cross": "patch-package && prebuildify-cross --napi --target 17.0.0 --force --strip --verbose",
     "semantic-release": "semantic-release",
     "pretest": "npm run rebuild",
     "rebuild": "node-gyp rebuild",
