@@ -1,0 +1,13 @@
+diff --git a/node_modules/prebuildify-cross/index.js b/node_modules/prebuildify-cross/index.js
+index 3048337..0031ced 100644
+--- a/node_modules/prebuildify-cross/index.js
++++ b/node_modules/prebuildify-cross/index.js
+@@ -11,7 +11,7 @@ const unixify = require('unixify')
+ const once = require('once')
+ const path = require('path')
+ 
+-const DOCKER_VERSION = 'v1.24'
++const DOCKER_VERSION = 'v1.44'
+ 
+ module.exports = function (opts, callback) {
+   if (typeof opts === 'function') {
