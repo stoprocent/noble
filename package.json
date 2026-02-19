@@ -34,7 +34,7 @@
     "patch-package": "^8.0.0"
   },
   "optionalDependencies": {
-    "@stoprocent/bluetooth-hci-socket": "^2.2.3"
+    "@stoprocent/bluetooth-hci-socket": "^2.2.4"
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.27.0",
