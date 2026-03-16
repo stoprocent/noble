@@ -57,12 +57,27 @@
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central 
 {
-    if (central.state != self.lastState && self.lastState == CBManagerStatePoweredOff && central.state == CBManagerStatePoweredOn) {
-        [self.peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL *stop) {
-            if (peripheral.state == CBPeripheralStateConnected) {
-                [self.centralManager cancelPeripheralConnection:peripheral];
-            }
-        }];
+    // if (central.state != self.lastState && self.lastState == CBManagerStatePoweredOff && central.state == CBManagerStatePoweredOn) {
+    //     [self.peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL *stop) {
+    //         if (peripheral.state == CBPeripheralStateConnected) {
+    //             [self.centralManager cancelPeripheralConnection:peripheral];
+    //         }
+    //     }];
+    // }
+
+    // Detect transition from any non-powered-on state to powered-on (e.g., after sleep)
+    BOOL wasPoweredOff = (self.lastState != CBManagerStatePoweredOn);
+    BOOL isNowPoweredOn = (central.state == CBManagerStatePoweredOn);
+    
+    if (wasPoweredOff && isNowPoweredOn) {
+        // Force disconnect ALL peripherals that Noble was tracking before sleep
+        NSArray *trackedUUIDs = [self.peripherals allKeys];
+        for (NSString *uuid in trackedUUIDs) {
+            CBPeripheral *peripheral = [self.peripherals objectForKey:uuid];
+            
+            // Always force disconnect, regardless of the peripheral's current state
+            [self.centralManager cancelPeripheralConnection:peripheral];
+        }
     }
 
     self.lastState = central.state;
