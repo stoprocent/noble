@@ -14,6 +14,7 @@
 // Project includes
 #include "radio_watcher.h"
 #include "winrt_cpp.h"
+#include "Emit.h"
 
 using namespace winrt::Windows::Devices::Enumeration;
 using namespace winrt::Windows::Devices::Bluetooth;
@@ -62,9 +63,19 @@ void RadioWatcher::Start(std::function<void(Radio& radio, const AdapterCapabilit
     watcher.Start();
 }
 
+void RadioWatcher::SetDeviceId(const std::string& deviceId)
+{
+    mDeviceId = winrt::to_hstring(deviceId);
+}
+
 winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
     try {
-        auto adapter = co_await BluetoothAdapter::GetDefaultAsync();
+        BluetoothAdapter adapter = nullptr;
+        if (!mDeviceId.empty()) {
+            adapter = co_await BluetoothAdapter::FromIdAsync(mDeviceId);
+        } else {
+            adapter = co_await BluetoothAdapter::GetDefaultAsync();
+        }
         
         if (adapter) {
             auto radio = co_await adapter.GetRadioAsync();
@@ -136,4 +147,31 @@ void RadioWatcher::OnCompleted(DeviceWatcher watcher, IInspectable info)
 {
     inEnumeration = false;
     OnRadioChanged();
+}
+
+winrt::fire_and_forget RadioWatcher::EnumerateAdapters(std::function<void(const std::vector<AdapterInfo>&)> callback)
+{
+    try {
+        auto selector = BluetoothAdapter::GetDeviceSelector();
+        auto devices = co_await DeviceInformation::FindAllAsync(selector);
+
+        BluetoothAdapter defaultAdapter = co_await BluetoothAdapter::GetDefaultAsync();
+        uint64_t defaultAddress = defaultAdapter ? defaultAdapter.BluetoothAddress() : 0;
+
+        std::vector<AdapterInfo> adapters;
+        for (const auto& devInfo : devices) {
+            auto adapter = co_await BluetoothAdapter::FromIdAsync(devInfo.Id());
+            if (adapter) {
+                AdapterInfo info;
+                info.id = winrt::to_string(devInfo.Id());
+                info.name = winrt::to_string(devInfo.Name());
+                info.address = formatBluetoothAddress(adapter.BluetoothAddress());
+                info.isDefault = (adapter.BluetoothAddress() == defaultAddress);
+                adapters.push_back(info);
+            }
+        }
+        callback(adapters);
+    } catch (const winrt::hresult_error&) {
+        callback({});
+    }
 }

@@ -7,11 +7,19 @@
 #include "Peripheral.h"
 #include "ThreadSafeCallback.h"
 
+struct AdapterInfo {
+    std::string id;
+    std::string address;
+    std::string name;
+    bool isDefault;
+};
+
 class Emit
 {
 public:
     // clang-format off
     void Wrap(const Napi::Value& receiver, const Napi::Function& callback);
+    void Adapters(const std::vector<AdapterInfo>& adapters);
     void RadioState(const std::string& status);
     void Address(const std::string& address);
     void ScanState(bool start);

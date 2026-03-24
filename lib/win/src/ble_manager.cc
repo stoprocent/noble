@@ -130,10 +130,13 @@ const std::vector<ServiceDataTypeInfo> serviceDataTypes = {
     }
 };
 
-BLEManager::BLEManager(const Napi::Value& receiver, const Napi::Function& callback)
+BLEManager::BLEManager(const Napi::Value& receiver, const Napi::Function& callback, const std::string& deviceId)
 {
     mRadioState = AdapterState::Initial;
     mEmit.Wrap(receiver, callback);
+    if (!deviceId.empty()) {
+        mWatcher.SetDeviceId(deviceId);
+    }
     auto onRadio = std::bind(&BLEManager::OnRadio, this, std::placeholders::_1, std::placeholders::_2);
     mWatcher.Start(onRadio);
     mAdvertismentWatcher.ScanningMode(BluetoothLEScanningMode::Active);
@@ -141,6 +144,20 @@ BLEManager::BLEManager(const Napi::Value& receiver, const Napi::Function& callba
     mReceivedRevoker = mAdvertismentWatcher.Received(winrt::auto_revoke, onReceived);
     auto onStopped = bind2(this, &BLEManager::OnScanStopped);
     mStoppedRevoker = mAdvertismentWatcher.Stopped(winrt::auto_revoke, onStopped);
+}
+
+void BLEManager::GetAdapters()
+{
+    mWatcher.EnumerateAdapters([this](const std::vector<AdapterInfo>& adapters) {
+        mEmit.Adapters(adapters);
+    });
+}
+
+void BLEManager::SetAdapter(const std::string& deviceId)
+{
+    mRadioState = AdapterState::Initial;
+    mWatcher.SetDeviceId(deviceId);
+    mWatcher.OnRadioChanged();
 }
 
 void BLEManager::OnRadio(Radio& radio, const AdapterCapabilities& capabilities)
