@@ -50,6 +50,9 @@ struct AdapterCapabilities {
 // Convert AdapterState to std:string
 const char* adapterStateToString(AdapterState state);
 
+// Forward declaration
+struct AdapterInfo;
+
 // RadioWatcher class
 class RadioWatcher
 {
@@ -57,8 +60,10 @@ public:
     RadioWatcher();
 
     void Start(std::function<void(Radio& radio, const AdapterCapabilities& capabilities)> on);
+    void SetDeviceId(const std::string& deviceId);
 
     winrt::fire_and_forget OnRadioChanged();
+    winrt::fire_and_forget EnumerateAdapters(std::function<void(const std::vector<AdapterInfo>&)> callback);
 
     void OnAdded(DeviceWatcher watcher, DeviceInformation info);
     void OnUpdated(DeviceWatcher watcher, DeviceInformationUpdate info);
@@ -69,9 +74,10 @@ private:
     Radio mRadio;
     DeviceWatcher watcher;
     bool inEnumeration;
-    
+    winrt::hstring mDeviceId;
+
     std::function<void(Radio& radio, const AdapterCapabilities& capabilities)> radioStateChanged;
-    
+
     winrt::event_revoker<IDeviceWatcher> mAddedRevoker;
     winrt::event_revoker<IDeviceWatcher> mUpdatedRevoker;
     winrt::event_revoker<IDeviceWatcher> mRemovedRevoker;
