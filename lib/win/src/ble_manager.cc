@@ -290,7 +290,7 @@ bool BLEManager::Connect(const std::string& uuid)
             
             // Add to device map
             mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
-        } catch (const std::exception& e) {
+        } catch (const std::exception&) {
             mEmit.Connected(uuid, "invalid device address format");
             return false;
         }
