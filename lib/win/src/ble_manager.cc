@@ -413,7 +413,7 @@ void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
             return;
         }
         PeripheralWinrt& peripheral = mDeviceMap[uuid];
-        if(peripheral.device.has_value() && &(peripheral.device.value()) == &device )
+        if (peripheral.device.has_value() && peripheral.device.value() == device)
         {
             peripheral.Disconnect();
             mNotifyMap.Remove(uuid);
