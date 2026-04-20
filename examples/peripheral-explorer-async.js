@@ -79,6 +79,8 @@ noble.on('discover', async (peripheral) => {
     console.log();
 
     await explore(peripheral);
+  } else {
+    console.log(`Peripheral with ID ${peripheral.id} and name ${peripheral.advertisement?.localName} ignored`);
   }
 });
 
