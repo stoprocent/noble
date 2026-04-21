@@ -73,9 +73,8 @@ jobs:
           merge-multiple: true
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.x
+          node-version: 24.x
       - run: npm ci
-      - run: npm install -g npm@latest
       - run: npm run semantic-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
