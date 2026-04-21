@@ -277,7 +277,7 @@ Napi::Value NobleWinrt::AddressToId(const Napi::CallbackInfo& info)
         }
         
         return Napi::String::New(info.Env(), cleanUuid.c_str());
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         return info.Env().Null();
     }
 }
