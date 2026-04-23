@@ -47,12 +47,37 @@
 
 NobleWinrt::NobleWinrt(const Napi::CallbackInfo& info) : ObjectWrap(info)
 {
+    if (info.Length() > 0 && info[0].IsObject()) {
+        auto options = info[0].As<Napi::Object>();
+        if (options.Has("deviceId") && options.Get("deviceId").IsString()) {
+            mDeviceId = options.Get("deviceId").As<Napi::String>().Utf8Value();
+        }
+    }
 }
 
 Napi::Value NobleWinrt::Start(const Napi::CallbackInfo& info)
 {
     Napi::Function emit = info.This().As<Napi::Object>().Get("emit").As<Napi::Function>();
-    manager = new BLEManager(info.This(), emit);
+    manager = new BLEManager(info.This(), emit, mDeviceId);
+    return info.Env().Undefined();
+}
+
+// getAdapters()
+Napi::Value NobleWinrt::GetAdapters(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    manager->GetAdapters();
+    return info.Env().Undefined();
+}
+
+// setAdapter(deviceId)
+Napi::Value NobleWinrt::SetAdapter(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    ARG1(String)
+    auto deviceId = info[0].As<Napi::String>().Utf8Value();
+    mDeviceId = deviceId;
+    manager->SetAdapter(deviceId);
     return info.Env().Undefined();
 }
 
@@ -304,6 +329,8 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "NobleWinrt", {
         NobleWinrt::InstanceMethod("start", &NobleWinrt::Start),
         NobleWinrt::InstanceMethod("stop", &NobleWinrt::Stop),
+        NobleWinrt::InstanceMethod("getAdapters", &NobleWinrt::GetAdapters),
+        NobleWinrt::InstanceMethod("setAdapter", &NobleWinrt::SetAdapter),
         NobleWinrt::InstanceMethod("startScanning", &NobleWinrt::Scan),
         NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
         NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
