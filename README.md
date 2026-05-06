@@ -292,7 +292,10 @@ const nobleCustom = withBindings('hci', {
 
 // D-Bus / BlueZ binding (Linux desktop). Talks to bluetoothd over org.bluez,
 // so it coexists with the system Bluetooth stack and does not need root /
-// CAP_NET_ADMIN. Install the optional `dbus-next` dependency to use it.
+// CAP_NET_ADMIN. Requires the `dbus-next` package to be installed in the
+// host project — it is not bundled, since it is only useful on Linux:
+//
+//   npm install dbus-next
 //
 // Supports basic GATT: scan, connect, service/characteristic/descriptor
 // discovery, read, write, notify/indicate. Does not support raw HCI handle
