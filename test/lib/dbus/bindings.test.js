@@ -270,6 +270,44 @@ describe('dbus/bindings', () => {
     expect(advertisement.serviceUuids).toEqual(['180d']);
   });
 
+  test('InterfacesAdded unwraps Variant-wrapped ManufacturerData and ServiceData payloads', async () => {
+    const bindings = new DbusBindings();
+    const discoveries = [];
+    bindings.on('discover', (...args) => discoveries.push(args));
+
+    bindings.start();
+    await flush();
+
+    // BlueZ exposes ManufacturerData as a{qv} and ServiceData as a{sv}; dbus-next
+    // surfaces each inner value as a Variant, not the raw bytes.
+    const mfgPayload = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const svcPayload = Buffer.from([0x01, 0x02, 0x03]);
+
+    const om = state.rootProxy.getInterface('org.freedesktop.DBus.ObjectManager');
+    om.emit('InterfacesAdded', '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF', {
+      'org.bluez.Device1': wrapDict({
+        Address: 'AA:BB:CC:DD:EE:FF',
+        AddressType: 'public',
+        ManufacturerData: { 0x004c: v('ay', mfgPayload) },
+        ServiceData: { '0000180d-0000-1000-8000-00805f9b34fb': v('ay', svcPayload) }
+      })
+    });
+    await flush();
+
+    expect(discoveries.length).toBe(1);
+    const advertisement = discoveries[0][4];
+
+    // Manufacturer: 2-byte little-endian company id (0x004c => Apple) + payload
+    expect(Buffer.isBuffer(advertisement.manufacturerData)).toBe(true);
+    expect(advertisement.manufacturerData.equals(
+      Buffer.concat([Buffer.from([0x4c, 0x00]), mfgPayload])
+    )).toBe(true);
+
+    expect(advertisement.serviceData).toEqual([
+      { uuid: '180d', data: svcPayload }
+    ]);
+  });
+
   test('discoverServices/Characteristics/Descriptors walk the cached object tree', async () => {
     const tree = adapterTree({
       '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF': {
