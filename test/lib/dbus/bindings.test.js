@@ -409,4 +409,75 @@ describe('dbus/bindings', () => {
     const bindings = new DbusBindings();
     expect(bindings.addressToId('AA:BB:CC:DD:EE:FF')).toBe('aabbccddeeff');
   });
+
+  describe('peripheral id normalization on public methods', () => {
+    const tree = () => adapterTree({
+      '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF': {
+        'org.bluez.Device1': { Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', Connected: false }
+      },
+      '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/service0001': {
+        'org.bluez.GattService1': { UUID: '0000180d-0000-1000-8000-00805f9b34fb', Primary: true }
+      },
+      '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF/service0001/char0002': {
+        'org.bluez.GattCharacteristic1': {
+          UUID: '00002a37-0000-1000-8000-00805f9b34fb',
+          Flags: ['read', 'notify']
+        }
+      }
+    });
+
+    const variants = [
+      ['canonical id', 'aabbccddeeff'],
+      ['uppercase id', 'AABBCCDDEEFF'],
+      ['mixed-case id', 'AaBbCcDdEeFf'],
+      ['colon MAC uppercase', 'AA:BB:CC:DD:EE:FF'],
+      ['colon MAC lowercase', 'aa:bb:cc:dd:ee:ff'],
+      ['colon MAC mixed', 'Aa:Bb:Cc:Dd:Ee:Ff']
+    ];
+
+    test.each(variants)('discoverServices accepts %s and emits canonical id', async (_label, input) => {
+      resetState(tree());
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+
+      const services = [];
+      bindings.on('servicesDiscover', (...a) => services.push(a));
+
+      bindings.discoverServices(input, []);
+
+      expect(services[0]).toEqual(['aabbccddeeff', ['180d']]);
+    });
+
+    test.each(variants)('read accepts %s and emits canonical id', async (_label, input) => {
+      resetState(tree());
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+
+      const reads = [];
+      bindings.on('read', (...a) => reads.push(a));
+
+      bindings.read(input, '180d', '2a37');
+      await flush();
+
+      expect(reads.length).toBe(1);
+      expect(reads[0][0]).toBe('aabbccddeeff');
+    });
+
+    test.each(variants)('readHandle (unsupported) emits canonical id for %s', (_label, input) => {
+      resetState(tree());
+      const bindings = new DbusBindings();
+      const events = [];
+      bindings.on('handleRead', (...a) => events.push(a));
+      bindings.readHandle(input, 0x42);
+      expect(events[0][0]).toBe('aabbccddeeff');
+    });
+
+    test('null/undefined peripheralUuid does not throw', () => {
+      const bindings = new DbusBindings();
+      expect(() => bindings.discoverServices(undefined, [])).not.toThrow();
+      expect(() => bindings.discoverServices(null, [])).not.toThrow();
+    });
+  });
 });
