@@ -36,6 +36,14 @@
   "optionalDependencies": {
     "@stoprocent/bluetooth-hci-socket": "^2.2.6"
   },
+  "peerDependencies": {
+    "dbus-next": "^0.10.0"
+  },
+  "peerDependenciesMeta": {
+    "dbus-next": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@babel/eslint-parser": "^7.27.0",
     "@commitlint/cli": "^19.3.0",
