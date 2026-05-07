@@ -268,9 +268,10 @@ import { withBindings } from '@stoprocent/noble';
 const noble = withBindings('default');
 
 // Specific bindings
-const nobleHci = withBindings('hci');  // HCI socket binding
-const nobleMac = withBindings('mac');  // macOS binding
-const nobleWin = withBindings('win');  // Windows binding
+const nobleHci = withBindings('hci');   // HCI socket binding
+const nobleDbus = withBindings('dbus'); // BlueZ D-Bus binding (Linux desktop)
+const nobleMac = withBindings('mac');   // macOS binding
+const nobleWin = withBindings('win');   // Windows binding
 
 // Custom options for HCI binding (Using UART HCI Dongle)
 const nobleCustom = withBindings('hci', { 
@@ -288,6 +289,23 @@ const nobleCustom = withBindings('hci', {
   hciDriver: 'native',
   deviceId: 0 // This could be also set by env.NOBLE_HCI_DEVICE_ID=0
 });
+
+// D-Bus / BlueZ binding (Linux desktop). Talks to bluetoothd over org.bluez,
+// so it coexists with the system Bluetooth stack and does not need root /
+// CAP_NET_ADMIN. Requires the `dbus-next` package to be installed in the
+// host project — it is not bundled, since it is only useful on Linux:
+//
+//   npm install dbus-next
+//
+// Supports basic GATT: scan, connect, service/characteristic/descriptor
+// discovery, read, write, notify/indicate. Does not support raw HCI handle
+// I/O, custom scan parameters, or vendor-specific commands.
+const nobleDbus = withBindings('dbus', {
+  adapterId: 'hci0' // optional; defaults to the first BlueZ adapter
+});
+
+// Equivalent to withBindings('dbus') without code changes:
+//   NOBLE_BINDINGS=dbus node app.js
 ```
 
 ### Core Methods
