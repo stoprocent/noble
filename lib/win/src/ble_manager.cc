@@ -362,6 +362,8 @@ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, Asyn
             peripheral.gattSession = session;
             auto token = session.MaxPduSizeChanged(onPduSizeChanged);
             peripheral.maxPduSizeChangedToken = token;
+
+            session.MaintainConnection(true);
         }
         else
         {
