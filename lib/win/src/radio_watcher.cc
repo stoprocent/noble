@@ -80,7 +80,11 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
             capabilities.centralRoleSupported = adapter.IsCentralRoleSupported();
 
             Radio bluetooth = nullptr;
-            if(adapter.IsCentralRoleSupported())
+            // GetRadioAsync() can resolve to a null radio when the Bluetooth
+            // Support Service (bthserv) is disabled, even though the adapter is
+            // still enumerated. Guard against it so we don't call StateChanged()
+            // on a null radio, which would otherwise crash the process.
+            if (adapter.IsCentralRoleSupported() && radio)
             {
                 // Always set up radio state monitoring for any radio (on or off)
                 bluetooth = radio;
@@ -108,7 +112,11 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
             AdapterCapabilities emptyCapabilities = {};
             radioStateChanged(mRadio, emptyCapabilities);
         }
-    } catch (const winrt::hresult_error&) {
+    } catch (...) {
+        // OnRadioChanged() runs as a fire_and_forget coroutine: any exception
+        // that escapes here terminates the whole process. Catch everything (not
+        // just winrt::hresult_error) and degrade gracefully to an empty adapter
+        // so a disabled bthserv / unexpected WinRT failure can't take down the app.
         mRadio = nullptr;
         mRadioStateChangedRevoker.revoke();
         AdapterCapabilities emptyCapabilities = {};
