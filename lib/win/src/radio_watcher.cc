@@ -69,15 +69,29 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
         if (adapter) {
             auto radio = co_await adapter.GetRadioAsync();
 
-            AdapterCapabilities capabilities;
+            AdapterCapabilities capabilities = {};
             capabilities.bluetoothAddress = adapter.BluetoothAddress();
             capabilities.classicSecureConnectionsSupported = adapter.AreClassicSecureConnectionsSupported();
             capabilities.lowEnergySecureConnectionsSupported = adapter.AreLowEnergySecureConnectionsSupported();
-            capabilities.extendedAdvertisingSupported = adapter.IsExtendedAdvertisingSupported();
             capabilities.lowEnergySupported = adapter.IsLowEnergySupported();
-            capabilities.maxAdvertisementDataLength = adapter.MaxAdvertisementDataLength();
             capabilities.peripheralRoleSupported = adapter.IsPeripheralRoleSupported();
             capabilities.centralRoleSupported = adapter.IsCentralRoleSupported();
+
+            // IsExtendedAdvertisingSupported and MaxAdvertisementDataLength were
+            // introduced in Windows 10, version 2004 (build 19041). On older builds
+            // (e.g. 1909 / 18363) these accessors throw, which would otherwise abort
+            // the whole capability read and make a working adapter look "unsupported".
+            // Guard them separately so they simply fall back to conservative defaults.
+            try
+            {
+                capabilities.extendedAdvertisingSupported = adapter.IsExtendedAdvertisingSupported();
+                capabilities.maxAdvertisementDataLength = adapter.MaxAdvertisementDataLength();
+            }
+            catch (const winrt::hresult_error&)
+            {
+                capabilities.extendedAdvertisingSupported = false;
+                capabilities.maxAdvertisementDataLength = 0;
+            }
 
             Radio bluetooth = nullptr;
             if(adapter.IsCentralRoleSupported())
