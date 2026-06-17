@@ -362,6 +362,16 @@ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, Asyn
             peripheral.gattSession = session;
             auto token = session.MaxPduSizeChanged(onPduSizeChanged);
             peripheral.maxPduSizeChangedToken = token;
+
+            // Proactively maintain the GATT session so Windows establishes the
+            // physical connection up front. FromBluetoothAddressAsync returns
+            // before the link is up; without this the first GATT operation
+            // triggers the connection while the MTU is still the default 23,
+            // racing the peripheral's MTU exchange during service discovery.
+            // MaintainConnection defaults to false; the session is released in
+            // PeripheralWinrt::Disconnect(), so this does not keep the link open
+            // after an intentional disconnect.
+            session.MaintainConnection(true);
         }
         else
         {
