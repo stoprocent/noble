@@ -10,6 +10,8 @@ public:
     NobleWinrt(const Napi::CallbackInfo&);
     Napi::Value Start(const Napi::CallbackInfo&);
     Napi::Value Stop(const Napi::CallbackInfo&);
+    Napi::Value GetAdapters(const Napi::CallbackInfo&);
+    Napi::Value SetAdapter(const Napi::CallbackInfo&);
     Napi::Value Scan(const Napi::CallbackInfo&);
     Napi::Value StopScan(const Napi::CallbackInfo&);
     Napi::Value Connect(const Napi::CallbackInfo&);
@@ -33,4 +35,5 @@ public:
 
 private:
     BLEManager* manager;
+    std::string mDeviceId;
 };

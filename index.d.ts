@@ -35,6 +35,8 @@ declare module '@stoprocent/noble' {
         readonly address: string;
     
         waitForPoweredOnAsync(timeout?: number): Promise<void>;
+        getAdaptersAsync(): Promise<Adapter[]>;
+        setAdapterAsync(deviceId: string): Promise<AdapterState>;
         startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
         stopScanningAsync(): Promise<void>;
         discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
@@ -247,8 +249,22 @@ declare module '@stoprocent/noble' {
         userChannel?: boolean;
     }
 
+    export interface Adapter {
+        /** WinRT device ID used for selecting this adapter */
+        id: string;
+        /** Bluetooth MAC address (e.g. "AA:BB:CC:DD:EE:FF") */
+        address: string;
+        /** Friendly adapter name */
+        name: string;
+        /** Whether this is the system default adapter */
+        default: boolean;
+    }
+
     export interface MacBindingsOptions extends BaseBindingsOptions {}
-    export interface WinBindingsOptions extends BaseBindingsOptions {}
+    export interface WinBindingsOptions extends BaseBindingsOptions {
+        /** WinRT device ID of the Bluetooth adapter to use (from getAdaptersAsync()) */
+        deviceId?: string;
+    }
 
     export type WithBindingsOptions = HciBindingsOptions | MacBindingsOptions | WinBindingsOptions;
 

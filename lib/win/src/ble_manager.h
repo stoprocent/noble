@@ -17,7 +17,9 @@ using winrt::Windows::Foundation::IInspectable;
 class BLEManager {
 public:
     // clang-format off
-    BLEManager(const Napi::Value& receiver, const Napi::Function& callback);
+    BLEManager(const Napi::Value& receiver, const Napi::Function& callback, const std::string& deviceId = "");
+    void GetAdapters();
+    void SetAdapter(const std::string& deviceId);
     void Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates);
     void StopScan();
     bool Connect(const std::string& uuid);

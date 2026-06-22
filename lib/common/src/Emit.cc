@@ -70,6 +70,24 @@ void Emit::Wrap(const Napi::Value& receiver, const Napi::Function& callback)
     mCallback = std::make_shared<ThreadSafeCallback>(receiver, callback);
 }
 
+void Emit::Adapters(const std::vector<AdapterInfo>& adapters)
+{
+    auto adaptersCopy = adapters;
+    mCallback->call([adaptersCopy](Napi::Env env, std::vector<napi_value>& args) {
+        auto arr = Napi::Array::New(env, adaptersCopy.size());
+        for (size_t i = 0; i < adaptersCopy.size(); i++) {
+            auto obj = Napi::Object::New(env);
+            obj.Set(_s("id"), _s(adaptersCopy[i].id));
+            obj.Set(_s("address"), _s(adaptersCopy[i].address));
+            obj.Set(_s("name"), _s(adaptersCopy[i].name));
+            obj.Set(_s("default"), _b(adaptersCopy[i].isDefault));
+            arr.Set(i, obj);
+        }
+        // emit('adapters', [...])
+        args = { _s("adapters"), arr };
+    });
+}
+
 void Emit::RadioState(const std::string& state)
 {
     mCallback->call([state](Napi::Env env, std::vector<napi_value>& args) {
