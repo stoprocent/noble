@@ -656,6 +656,42 @@ describe('dbus/bindings', () => {
       expect(events[0][2]).toBeInstanceOf(Error);
     });
 
+    test('remote drop while Connect() is in flight surfaces as connect(err), not an unhandled rejection (#91)', async () => {
+      seedDevice();
+      const proxy = makeProxy(devicePath);
+      // Keep Connect() pending so the drop lands while _connect is still
+      // awaiting the D-Bus call — the unhandled-rejection window from #91.
+      const device1 = proxy.getInterface('org.bluez.Device1');
+      device1.Connect = jest.fn().mockReturnValue(new Promise(() => {}));
+
+      const unhandled = [];
+      const onUnhandled = err => unhandled.push(err);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const bindings = new DbusBindings();
+        const connects = [];
+        bindings.on('connect', (...a) => connects.push(a));
+
+        bindings.start();
+        await flush();
+        bindings.connect('aabbccddeeff');
+        await flush();
+        expect(device1.Connect).toHaveBeenCalled();
+
+        const props = proxy.getInterface('org.freedesktop.DBus.Properties');
+        props.emit('PropertiesChanged', 'org.bluez.Device1', wrapDict({ Connected: false }));
+        await flush();
+
+        expect(connects.length).toBe(1);
+        expect(connects[0][0]).toBe('aabbccddeeff');
+        expect(connects[0][1]).toBeInstanceOf(Error);
+        expect(connects[0][1].message).toMatch(/disconnected: remote/);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
     test('an established connection that drops emits a single disconnect', async () => {
       resetState(adapterTree({
         [devicePath]: {
