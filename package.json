@@ -51,7 +51,7 @@
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/exec": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.6",
+    "@semantic-release/github": "^12.0.9",
     "@semantic-release/npm": "^13.1.5",
     "async": "^3.2.6",
     "cross-env": "^7.0.3",
