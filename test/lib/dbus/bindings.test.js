@@ -518,4 +518,262 @@ describe('dbus/bindings', () => {
       expect(() => bindings.discoverServices(null, [])).not.toThrow();
     });
   });
+
+  describe('scan service-uuid filtering (software-side)', () => {
+    function emitDevice (deviceProps) {
+      const om = state.rootProxy.getInterface('org.freedesktop.DBus.ObjectManager');
+      om.emit('InterfacesAdded', '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF', {
+        'org.bluez.Device1': wrapDict({ Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', ...deviceProps })
+      });
+    }
+
+    test('does not push a UUIDs filter to BlueZ SetDiscoveryFilter', async () => {
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+
+      bindings.startScanning(['180d'], false);
+      await flush();
+
+      const setFilter = state.ifaceCalls.find(c => c.method === 'SetDiscoveryFilter');
+      expect(setFilter).toBeDefined();
+      expect('UUIDs' in setFilter.args[0]).toBe(false);
+    });
+
+    test('discovers a device that advertises the UUID only in service data', async () => {
+      const bindings = new DbusBindings();
+      const discoveries = [];
+      bindings.on('discover', (...args) => discoveries.push(args));
+
+      bindings.start();
+      await flush();
+      bindings.startScanning(['180d'], false);
+      await flush();
+
+      emitDevice({
+        ServiceData: { '0000180d-0000-1000-8000-00805f9b34fb': v('ay', Buffer.from([0x01])) }
+      });
+      await flush();
+
+      expect(discoveries.length).toBe(1);
+      expect(discoveries[0][0]).toBe('aabbccddeeff');
+    });
+
+    test('filters out a device that matches neither service UUIDs nor service data', async () => {
+      const bindings = new DbusBindings();
+      const discoveries = [];
+      bindings.on('discover', (...args) => discoveries.push(args));
+
+      bindings.start();
+      await flush();
+      bindings.startScanning(['180d'], false);
+      await flush();
+
+      emitDevice({
+        UUIDs: ['0000feaa-0000-1000-8000-00805f9b34fb'],
+        ServiceData: { '0000feaa-0000-1000-8000-00805f9b34fb': v('ay', Buffer.from([0x01])) }
+      });
+      await flush();
+
+      expect(discoveries.length).toBe(0);
+    });
+
+    test('empty scan filter discovers everything', async () => {
+      const bindings = new DbusBindings();
+      const discoveries = [];
+      bindings.on('discover', (...args) => discoveries.push(args));
+
+      bindings.start();
+      await flush();
+      bindings.startScanning([], false);
+      await flush();
+
+      emitDevice({ UUIDs: ['0000feaa-0000-1000-8000-00805f9b34fb'] });
+      await flush();
+
+      expect(discoveries.length).toBe(1);
+    });
+  });
+
+  describe('connect failure recovery', () => {
+    const devicePath = '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF';
+
+    function seedDevice () {
+      resetState(adapterTree({
+        [devicePath]: {
+          'org.bluez.Device1': { Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', Connected: false }
+        }
+      }));
+    }
+
+    test('failed Connect emits connect(error), no disconnect, and clears the proxy', async () => {
+      seedDevice();
+      const proxy = makeProxy(devicePath);
+      proxy.getInterface('org.bluez.Device1').Connect = () => Promise.reject(new Error('le-connection-abort-by-local'));
+
+      const bindings = new DbusBindings();
+      const connects = [];
+      const disconnects = [];
+      bindings.on('connect', (id, err) => connects.push([id, err]));
+      bindings.on('disconnect', (id, reason) => disconnects.push([id, reason]));
+
+      bindings.start();
+      await flush();
+      bindings.connect('aabbccddeeff');
+      await flush();
+
+      expect(connects.length).toBe(1);
+      expect(connects[0][0]).toBe('aabbccddeeff');
+      expect(connects[0][1]).toBeInstanceOf(Error);
+
+      // Matches hci-socket: a failed attempt emits no 'disconnect'.
+      expect(disconnects.length).toBe(0);
+
+      // Proxy/listener released so a retry starts clean.
+      expect(bindings._devices.get('aabbccddeeff').proxy).toBeNull();
+    });
+
+    test('a remote drop mid-connect surfaces as connect(error), not disconnect', async () => {
+      seedDevice();
+      const proxy = makeProxy(devicePath);
+
+      const bindings = new DbusBindings();
+      const events = [];
+      bindings.on('connect', (id, err) => events.push(['connect', id, err]));
+      bindings.on('disconnect', (id, reason) => events.push(['disconnect', id, reason]));
+
+      bindings.start();
+      await flush();
+      bindings.connect('aabbccddeeff');
+      await flush();
+
+      const props = proxy.getInterface('org.freedesktop.DBus.Properties');
+      props.emit('PropertiesChanged', 'org.bluez.Device1', wrapDict({ Connected: false }));
+      await flush();
+
+      expect(events.length).toBe(1);
+      expect(events[0][0]).toBe('connect');
+      expect(events[0][2]).toBeInstanceOf(Error);
+    });
+
+    test('an established connection that drops emits a single disconnect', async () => {
+      resetState(adapterTree({
+        [devicePath]: {
+          'org.bluez.Device1': {
+            Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', Connected: true, ServicesResolved: true
+          }
+        }
+      }));
+      const proxy = makeProxy(devicePath);
+
+      const bindings = new DbusBindings();
+      const connects = [];
+      const disconnects = [];
+      bindings.on('connect', (id, err) => connects.push([id, err]));
+      bindings.on('disconnect', (id, reason) => disconnects.push([id, reason]));
+
+      bindings.start();
+      await flush();
+      bindings.connect('aabbccddeeff');
+      await flush();
+      expect(connects.length).toBe(1);
+      expect(connects[0][1]).toBeNull();
+
+      const props = proxy.getInterface('org.freedesktop.DBus.Properties');
+      props.emit('PropertiesChanged', 'org.bluez.Device1', wrapDict({ Connected: false }));
+      await flush();
+
+      expect(disconnects.length).toBe(1);
+      expect(disconnects[0][0]).toBe('aabbccddeeff');
+    });
+  });
+
+  describe('late-arriving advertisement data during scan', () => {
+    const devicePath = '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF';
+
+    test('a UUID that arrives in a later PropertiesChanged still triggers discover', async () => {
+      const bindings = new DbusBindings();
+      const discoveries = [];
+      bindings.on('discover', (...args) => discoveries.push(args));
+
+      bindings.start();
+      await flush();
+      bindings.startScanning(['180d'], false);
+      await flush();
+
+      // First sighting has no matching UUID -> tracked, not discovered.
+      const om = state.rootProxy.getInterface('org.freedesktop.DBus.ObjectManager');
+      om.emit('InterfacesAdded', devicePath, {
+        'org.bluez.Device1': wrapDict({ Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', RSSI: -50 })
+      });
+      await flush();
+      expect(discoveries.length).toBe(0);
+
+      // BlueZ later aggregates the matching service data -> now discovered.
+      const props = makeProxy(devicePath).getInterface('org.freedesktop.DBus.Properties');
+      props.emit('PropertiesChanged', 'org.bluez.Device1', wrapDict({
+        ServiceData: { '0000180d-0000-1000-8000-00805f9b34fb': v('ay', Buffer.from([0x01])) }
+      }));
+      await flush();
+
+      expect(discoveries.length).toBe(1);
+      expect(discoveries[0][0]).toBe('aabbccddeeff');
+    });
+
+    test('a watcher suspended on getProxyObject across stopScanning does not re-attach', async () => {
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+      bindings.startScanning([], false);
+      await flush();
+
+      // Park the watcher on getProxyObject, and keep _stopScanning suspended on
+      // StopDiscovery, so the watcher resumes mid-stop — the F1 race window.
+      let releaseWatch;
+      const watchGate = new Promise(resolve => { releaseWatch = resolve; });
+      mockBus.getProxyObject.mockImplementationOnce(async (_svc, path) => {
+        await watchGate;
+        return makeProxy(path);
+      });
+      let releaseStop;
+      const stopGate = new Promise(resolve => { releaseStop = resolve; });
+      makeProxy('/org/bluez/hci0').getInterface('org.bluez.Adapter1').StopDiscovery = () => stopGate;
+
+      const om = state.rootProxy.getInterface('org.freedesktop.DBus.ObjectManager');
+      om.emit('InterfacesAdded', devicePath, {
+        'org.bluez.Device1': wrapDict({ Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public' })
+      });
+      await flush(); // _watchDeviceProps parked on watchGate
+
+      bindings.stopScanning(); // _stopScanning parked on StopDiscovery
+      await flush();
+
+      releaseWatch(); // watcher resumes while stop is still in flight
+      await flush();
+
+      releaseStop();
+      await flush();
+
+      expect(bindings._scanPropsListeners.size).toBe(0);
+    });
+
+    test('scan-time watchers are detached on stopScanning', async () => {
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+      bindings.startScanning([], false);
+      await flush();
+
+      const om = state.rootProxy.getInterface('org.freedesktop.DBus.ObjectManager');
+      om.emit('InterfacesAdded', devicePath, {
+        'org.bluez.Device1': wrapDict({ Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public' })
+      });
+      await flush();
+      expect(bindings._scanPropsListeners.size).toBe(1);
+
+      bindings.stopScanning();
+      await flush();
+      expect(bindings._scanPropsListeners.size).toBe(0);
+    });
+  });
 });
