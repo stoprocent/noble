@@ -32,5 +32,5 @@ public:
     static Napi::Object Init(Napi::Env env, Napi::Object exports);
 
 private:
-    BLEManager* manager;
+    BLEManager* manager = nullptr;
 };

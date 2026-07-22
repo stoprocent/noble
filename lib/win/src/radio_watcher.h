@@ -8,7 +8,9 @@
 #pragma once
 
 // Standard library includes
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <set>
 
 // Windows Runtime includes
@@ -55,6 +57,7 @@ class RadioWatcher
 {
 public:
     RadioWatcher();
+    ~RadioWatcher();
 
     void Start(std::function<void(Radio& radio, const AdapterCapabilities& capabilities)> on);
 
@@ -77,4 +80,10 @@ private:
     winrt::event_revoker<IDeviceWatcher> mRemovedRevoker;
     winrt::event_revoker<IDeviceWatcher> mCompletedRevoker;
     winrt::event_revoker<IRadio> mRadioStateChangedRevoker;
+
+    // Shared liveness flag observed by the fire_and_forget OnRadioChanged()
+    // coroutine. The coroutine keeps its own copy of the shared_ptr, so the
+    // flag outlives the RadioWatcher and can be safely checked after each
+    // co_await to avoid touching a destroyed object during teardown.
+    std::shared_ptr<std::atomic<bool>> mAlive;
 };
