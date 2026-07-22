@@ -19,7 +19,6 @@
         'VCCLCompilerTool': {
           'ExceptionHandling': 1,
           'AdditionalOptions': [
-            '/await', 
             '/std:c++20'
           ],
         },
@@ -28,7 +27,7 @@
       'msvs_target_platform_minversion':'10.0.18362.0',
       'conditions': [
         ['OS=="win"', { 
-          'defines': [ '_HAS_EXCEPTIONS=1', 'NAPI_CPP_EXCEPTIONS' ] 
+          'defines': [ '_HAS_EXCEPTIONS=1', 'NAPI_CPP_EXCEPTIONS', '_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS' ] 
         }]
       ],
     }
