@@ -33,6 +33,13 @@ jobs:
     - run: npm ci
     - run: npm run rebuild
     - run: npm run test
+    # Headless runtime smoke test for the WinRT teardown fixes (issue #95).
+    # Exercises the actual native binding's start()/stop() paths, which the
+    # Jest suite mocks. Reproduces the crash scenarios that do not need a real
+    # Bluetooth adapter; a clean exit means no 0xC0000005 on teardown.
+    - if: runner.os == 'Windows'
+      name: Windows teardown smoke test (issue #95)
+      run: node test/win-smoke/teardown.smoke.js
     - uses: codecov/codecov-action@v4
       with:
         directory: ./coverage/
