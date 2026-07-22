@@ -46,13 +46,53 @@ const char* adapterStateToString(AdapterState state)
 }
 
 RadioWatcher::RadioWatcher()
-    : mRadio(nullptr), watcher(DeviceInformation::CreateWatcher(BluetoothAdapter::GetDeviceSelector()))
+    : mRadio(nullptr),
+      watcher(DeviceInformation::CreateWatcher(BluetoothAdapter::GetDeviceSelector())),
+      mAlive(std::make_shared<std::atomic<bool>>(true))
 {
     mAddedRevoker = watcher.Added(winrt::auto_revoke, bind2(this, &RadioWatcher::OnAdded));
     mUpdatedRevoker = watcher.Updated(winrt::auto_revoke, bind2(this, &RadioWatcher::OnUpdated));
     mRemovedRevoker = watcher.Removed(winrt::auto_revoke, bind2(this, &RadioWatcher::OnRemoved));
     auto completed = bind2(this, &RadioWatcher::OnCompleted);
     mCompletedRevoker = watcher.EnumerationCompleted(winrt::auto_revoke, completed);
+}
+
+RadioWatcher::~RadioWatcher()
+{
+    // Signal any in-flight OnRadioChanged() coroutine that this object is gone
+    // so it does not dereference `this` after resuming from a co_await. Without
+    // this, tearing down the BLEManager (noble.stop()) while an enumeration /
+    // radio-state coroutine is still pending races into a use-after-free and
+    // crashes the process with 0xC0000005 (ACCESS_VIOLATION).
+    if (mAlive)
+    {
+        mAlive->store(false);
+    }
+
+    // Stop delivering further callbacks before the members they touch are
+    // destroyed.
+    mAddedRevoker.revoke();
+    mUpdatedRevoker.revoke();
+    mRemovedRevoker.revoke();
+    mCompletedRevoker.revoke();
+    mRadioStateChangedRevoker.revoke();
+
+    try
+    {
+        if (watcher)
+        {
+            auto status = watcher.Status();
+            if (status == DeviceWatcherStatus::Started ||
+                status == DeviceWatcherStatus::EnumerationCompleted)
+            {
+                watcher.Stop();
+            }
+        }
+    }
+    catch (...)
+    {
+        // Best effort during teardown; never let an exception escape a destructor.
+    }
 }
 
 void RadioWatcher::Start(std::function<void(Radio& radio, const AdapterCapabilities& capabilities)> on)
@@ -63,11 +103,18 @@ void RadioWatcher::Start(std::function<void(Radio& radio, const AdapterCapabilit
 }
 
 winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
+    // Keep a private copy of the liveness flag alive for the whole coroutine so
+    // it stays valid even if the RadioWatcher is destroyed while we are
+    // suspended on a co_await. Re-check it after every co_await before touching
+    // `this` to avoid a use-after-free during teardown (noble.stop()).
+    auto alive = mAlive;
     try {
         auto adapter = co_await BluetoothAdapter::GetDefaultAsync();
-        
+        if (!alive->load()) co_return;
+
         if (adapter) {
             auto radio = co_await adapter.GetRadioAsync();
+            if (!alive->load()) co_return;
 
             AdapterCapabilities capabilities = {};
             capabilities.bluetoothAddress = adapter.BluetoothAddress();
@@ -131,6 +178,7 @@ winrt::fire_and_forget RadioWatcher::OnRadioChanged() {
         // that escapes here terminates the whole process. Catch everything (not
         // just winrt::hresult_error) and degrade gracefully to an empty adapter
         // so a disabled bthserv / unexpected WinRT failure can't take down the app.
+        if (!alive->load()) co_return;
         mRadio = nullptr;
         mRadioStateChangedRevoker.revoke();
         AdapterCapabilities emptyCapabilities = {};

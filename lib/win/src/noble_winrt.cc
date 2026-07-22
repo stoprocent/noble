@@ -58,9 +58,17 @@ Napi::Value NobleWinrt::Start(const Napi::CallbackInfo& info)
 
 Napi::Value NobleWinrt::Stop(const Napi::CallbackInfo& info)
 {
-    CHECK_MANAGER()
-    delete manager;
-    manager = nullptr;
+    // stop() must be a safe, idempotent teardown. Guard against a null manager
+    // (never started, or already stopped) instead of throwing, and never
+    // delete a pointer that was never assigned. `manager` is default
+    // initialized to nullptr (see noble_winrt.h), so this also protects the
+    // "withBindings() then stop() without ever powering on" path that
+    // previously deleted an uninitialized pointer and crashed with 0xC0000005.
+    if (manager)
+    {
+        delete manager;
+        manager = nullptr;
+    }
     return info.Env().Undefined();
 }
 
