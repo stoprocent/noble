@@ -266,7 +266,7 @@ describe('noble', () => {
       expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
     });
 
-    test('resumes after a binding-level scan pause', async () => {
+    test('resumes after a binding-level scan pause with a transient scan start', async () => {
       const firstPeripheral = { id: 'first' };
       const secondPeripheral = { id: 'second' };
       const first = iterator.next();
@@ -276,6 +276,10 @@ describe('noble', () => {
       // The HCI binding stops scanning internally before connecting. This does
       // not pass through Noble.stopScanning(), so it must remain resumable.
       noble._onScanStop();
+
+      // LE connection setup can briefly enable controller scanning and emit a
+      // scanStart without a matching scanStop. It is not the discovery scan.
+      noble._onScanStart();
 
       const second = iterator.next();
       await Promise.resolve();
