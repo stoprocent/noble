@@ -366,6 +366,21 @@ const data = await peripheral.readHandleAsync(handle);
 await peripheral.writeHandleAsync(handle, data, withoutResponse);
 ```
 
+The Linux HCI binding reports controller disconnect reasons as numeric HCI
+status codes. Other bindings and library cleanup paths may report a string.
+Use `hciStatusMessage` when a human-readable HCI message is needed:
+
+```typescript
+import noble, { hciStatusMessage } from '@stoprocent/noble';
+
+peripheral.on('disconnect', reason => {
+  const message = typeof reason === 'number'
+    ? hciStatusMessage(reason)
+    : reason;
+  console.log(`Disconnected: ${message}`);
+});
+```
+
 ### Service Methods
 
 ```typescript
