@@ -243,7 +243,10 @@ declare module '@stoprocent/noble' {
         deviceId?: number;
         /** Use With BLE5 Extended Features, Default is based on the result of LE_READ_LOCAL_SUPPORTED_FEATURES command */
         extended?: boolean;
-        /** Uses User channel instead of Raw HCI Channel */
+        /**
+         * Use the exclusive Linux HCI user channel instead of the shared raw
+         * channel. The selected adapter must be down before binding.
+         */
         userChannel?: boolean;
     }
 

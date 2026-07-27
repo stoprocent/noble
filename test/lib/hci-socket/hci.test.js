@@ -41,6 +41,42 @@ describe('hci-socket hci', () => {
     sinon.reset();
   });
 
+  describe('user channel configuration', () => {
+    const originalUserChannel = process.env.HCI_CHANNEL_USER;
+
+    afterEach(() => {
+      if (typeof originalUserChannel === 'undefined') {
+        delete process.env.HCI_CHANNEL_USER;
+      } else {
+        process.env.HCI_CHANNEL_USER = originalUserChannel;
+      }
+    });
+
+    it('uses the userChannel option', () => {
+      delete process.env.HCI_CHANNEL_USER;
+
+      const configuredHci = new Hci({ userChannel: true });
+
+      should(configuredHci._userChannel).be.true();
+    });
+
+    it('allows the option to disable an environment setting', () => {
+      process.env.HCI_CHANNEL_USER = '1';
+
+      const configuredHci = new Hci({ userChannel: false });
+
+      should(configuredHci._userChannel).be.false();
+    });
+
+    it('uses HCI_CHANNEL_USER when the option is omitted', () => {
+      process.env.HCI_CHANNEL_USER = '1';
+
+      const configuredHci = new Hci({});
+
+      should(configuredHci._userChannel).be.true();
+    });
+  });
+
   describe('init', () => {
     it('should reset', () => {
       hci.reset = sinon.spy();

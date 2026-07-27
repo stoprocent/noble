@@ -567,6 +567,48 @@ See [@don](https://github.com/don)'s setup guide on [Bluetooth LE with Node.js a
 
 Make sure your container runs with `--network=host` options and all specific environment prerequisites are verified.
 
+### Choosing a Linux Bluetooth access mode
+
+Noble supports three materially different Linux setups:
+
+- **D-Bus binding:** `withBindings('dbus')` uses the system BlueZ service and
+  is the best default when noble should coexist with desktop or system
+  Bluetooth clients.
+- **Raw HCI binding:** `withBindings('hci')` is the default on Linux. It shares
+  the controller with the kernel Bluetooth stack and BlueZ. It requires raw
+  socket privileges and gives noble direct access to HCI traffic.
+- **HCI user channel:** `withBindings('hci', { userChannel: true })` gives noble
+  exclusive controller access. Use it for a dedicated adapter when another
+  Bluetooth stack must not operate that controller.
+
+The user channel requires `CAP_NET_ADMIN` (running with `sudo` is the simplest
+setup) and the adapter must be down before noble binds it:
+
+```sh
+sudo hciconfig hci1 down
+sudo NOBLE_HCI_DEVICE_ID=1 HCI_CHANNEL_USER=1 node app.js
+```
+
+The equivalent code configuration is:
+
+```typescript
+const noble = withBindings('hci', {
+  hciDriver: 'native',
+  deviceId: 1,
+  userChannel: true
+});
+```
+
+Binding the user channel to an adapter that is still up fails with `EBUSY`.
+Conversely, raw mode does not power up a down adapter; run
+`sudo hciconfig hciX up` first when using raw mode.
+
+When diagnosing raw-mode traffic with `btmon`, an unlabeled HCI command only
+shows that the kernel sent it. It is not, by itself, proof that `bluetoothd`
+started an unrelated operation: noble's native HCI dependency also uses kernel
+L2CAP sockets for connection bookkeeping. Use a dedicated adapter with the
+user channel when command ownership must be unambiguous.
+
 ### Running without root/sudo (Linux-specific)
 
 Run the following command:
@@ -585,7 +627,9 @@ It can be installed the following way:
 
 ### Multiple Adapters (Linux-specific)
 
-`hci0` is used by default.
+When no adapter is specified, raw mode selects the first adapter that is up,
+while the user channel selects the first adapter that is down. Specify the
+adapter explicitly whenever more than one is present.
 
 You can specify which HCI adapter to use in two ways:
 
@@ -644,6 +688,7 @@ The following environment variables can configure noble's behavior:
 | Variable | Purpose | Default | Example |
 |----------|---------|---------|---------|
 | NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
+| HCI_CHANNEL_USER | Use the exclusive Linux HCI user channel | false | `export HCI_CHANNEL_USER=1` |
 | NOBLE_REPORT_ALL_HCI_EVENTS | Report HCI events without waiting for scan response | false | `export NOBLE_REPORT_ALL_HCI_EVENTS=1` |
 | BLUETOOTH_HCI_SOCKET_UART_PORT | UART port for HCI communication | none | `export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/ttyUSB0` |
 | BLUETOOTH_HCI_SOCKET_UART_BAUDRATE | UART baudrate | 1000000 | `export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000` |
