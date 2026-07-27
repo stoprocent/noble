@@ -17,6 +17,12 @@ declare module '@stoprocent/noble' {
 
     export type PeripheralIdOrAddress = string;
 
+    /**
+     * Linux HCI bindings emit the numeric controller status. Other bindings
+     * and library-initiated cleanup paths emit a descriptive string.
+     */
+    export type DisconnectReason = number | string;
+
     export type CharacteristicProperty = 'read' | 'write' | 'indicate' | 'notify' | 'writeWithoutResponse';
 
     export interface ConnectOptions {
@@ -122,14 +128,14 @@ declare module '@stoprocent/noble' {
         toString(): string;
     
         on(event: "connect", listener: (error: Error | undefined) => void): this;
-        on(event: "disconnect", listener: (reason: string) => void): this;
+        on(event: "disconnect", listener: (reason: DisconnectReason) => void): this;
         on(event: "rssiUpdate", listener: (rssi: number) => void): this;
         on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
         on(event: "mtu", listener: (mtu: number) => void): this;
         on(event: string, listener: Function): this;
     
         once(event: "connect", listener: (error: Error | undefined) => void): this;
-        once(event: "disconnect", listener: (reason: string) => void): this;
+        once(event: "disconnect", listener: (reason: DisconnectReason) => void): this;
         once(event: "rssiUpdate", listener: (rssi: number) => void): this;
         once(event: "servicesDiscover", listener: (services: Service[]) => void): this;
         once(event: string, listener: Function): this;
@@ -256,6 +262,9 @@ declare module '@stoprocent/noble' {
         bindingType?: BindingType, 
         options?: WithBindingsOptions
     ): Noble;
+
+    /** Resolve a numeric HCI status code to its Bluetooth specification message. */
+    export function hciStatusMessage(reason: DisconnectReason): string;
 
     // Define a default export
     const NobleDefault: Noble;
