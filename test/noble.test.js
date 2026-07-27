@@ -14,6 +14,7 @@ describe('noble', () => {
   beforeEach(() => {
     mockBindings = {
       start: jest.fn(),
+      stop: jest.fn(),
       on: jest.fn(),
       startScanning: jest.fn(),
       stopScanning: jest.fn(),
@@ -230,6 +231,110 @@ describe('noble', () => {
       await expect(promise).resolves.toBeUndefined();
       expect(mockBindings.stopScanning).toHaveBeenCalled();
       expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('discoverAsync', () => {
+    let iterator;
+
+    beforeEach(() => {
+      noble._initialized = true;
+      noble._state = 'poweredOn';
+      mockBindings.startScanning.mockImplementation(() => noble._onScanStart());
+      mockBindings.stopScanning.mockImplementation(() => noble._onScanStop());
+      iterator = noble.discoverAsync();
+    });
+
+    afterEach(async () => {
+      await iterator.return();
+    });
+
+    test('yields discovered peripherals and stops scanning when returned', async () => {
+      const peripheral = { id: 'first' };
+      const nextPeripheral = iterator.next();
+
+      noble.emit('discover', peripheral);
+
+      await expect(nextPeripheral).resolves.toEqual({
+        value: peripheral,
+        done: false
+      });
+
+      await iterator.return();
+
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
+      expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
+    });
+
+    test('resumes after a binding-level scan pause with a transient scan start', async () => {
+      const firstPeripheral = { id: 'first' };
+      const secondPeripheral = { id: 'second' };
+      const first = iterator.next();
+      noble.emit('discover', firstPeripheral);
+      await first;
+
+      // The HCI binding stops scanning internally before connecting. This does
+      // not pass through Noble.stopScanning(), so it must remain resumable.
+      noble._onScanStop();
+
+      // LE connection setup can briefly enable controller scanning and emit a
+      // scanStart without a matching scanStop. It is not the discovery scan.
+      noble._onScanStart();
+
+      const second = iterator.next();
+      await Promise.resolve();
+      noble.emit('discover', secondPeripheral);
+
+      await expect(second).resolves.toEqual({
+        value: secondPeripheral,
+        done: false
+      });
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(2);
+    });
+
+    test('ends after an explicit stopScanningAsync call', async () => {
+      const first = iterator.next();
+      noble.emit('discover', { id: 'first' });
+      await first;
+
+      await noble.stopScanningAsync();
+
+      await expect(iterator.next()).resolves.toEqual({
+        value: undefined,
+        done: true
+      });
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
+      expect(mockBindings.stopScanning).toHaveBeenCalledTimes(1);
+    });
+
+    test('ends after Noble is stopped', async () => {
+      const first = iterator.next();
+      noble.emit('discover', { id: 'first' });
+      await first;
+
+      noble.stop();
+
+      await expect(iterator.next()).resolves.toEqual({
+        value: undefined,
+        done: true
+      });
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
+      expect(mockBindings.stop).toHaveBeenCalledTimes(1);
+    });
+
+    test('ends instead of restarting when the adapter powers off', async () => {
+      const first = iterator.next();
+      noble.emit('discover', { id: 'first' });
+      await first;
+
+      noble._onScanStop();
+      noble._onStateChange('poweredOff');
+
+      await expect(iterator.next()).resolves.toEqual({
+        value: undefined,
+        done: true
+      });
+      expect(mockBindings.startScanning).toHaveBeenCalledTimes(1);
     });
   });
 

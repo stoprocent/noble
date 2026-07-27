@@ -89,10 +89,8 @@ import noble from '@stoprocent/noble';
 try {
   // Wait for Adapter poweredOn state
   await noble.waitForPoweredOnAsync();
-  // Start scanning first
-  await noble.startScanningAsync();
-  
-  // Use the async generator with proper boundaries
+
+  // discoverAsync starts and owns the scanning session
   for await (const peripheral of noble.discoverAsync()) {
     console.log(`Found device: ${peripheral.advertisement.localName || 'Unknown'}`);
     // Process the peripheral as needed
@@ -103,13 +101,15 @@ try {
     }
   }
   
-  // Clean up after discovery
-  await noble.stopScanningAsync();
 } catch (error) {
   console.error('Discovery error:', error);
   await noble.stopScanningAsync();
 }
 ```
+
+`discoverAsync()` resumes scanning after temporary binding-level pauses, such
+as the Linux HCI binding stopping scan while it connects. Break the loop or
+call `stopScanning()` / `stopScanningAsync()` to end the discovery session.
 
 For a more detailed example, please check out [examples/peripheral-explorer.ts](examples/peripheral-explorer.ts)
 
@@ -320,7 +320,8 @@ await noble.startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolea
 // Stop scanning
 await noble.stopScanningAsync();
 
-// Discover peripherals as an async generator
+// Discover peripherals as an async generator. This starts scanning and
+// resumes temporary binding-level scan pauses until the loop is stopped.
 for await (const peripheral of noble.discoverAsync()) {
   // handle each discovered peripheral
 }
