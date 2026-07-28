@@ -154,6 +154,14 @@ void Emit::Connected(const std::string& uuid, const std::string& error)
     });
 }
 
+void Emit::Paired(const std::string& uuid, bool paired, const std::string& error)
+{
+    mCallback->call([uuid, paired, error](Napi::Env env, std::vector<napi_value>& args) {
+        // emit('pair', deviceUuid, paired, error)
+        args = { _s("pair"), _u(uuid), _b(paired), error.empty() ? env.Null() : _e(error) };
+    });
+}
+
 void Emit::Disconnected(const std::string& uuid)
 {
     mCallback->call([uuid](Napi::Env env, std::vector<napi_value>& args) {

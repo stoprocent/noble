@@ -17,6 +17,7 @@ public:
     void ScanState(bool start);
     void Scan(const std::string& uuid, int rssi, const Peripheral& peripheral);
     void Connected(const std::string& uuid, const std::string& error = "");
+    void Paired(const std::string& uuid, bool paired, const std::string& error = "");
     void Disconnected(const std::string& uuid);
     void MTU(const std::string& uuid, int mtu);
     void RSSI(const std::string& uuid, int rssi, const std::string& error = "");

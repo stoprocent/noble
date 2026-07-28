@@ -6,8 +6,13 @@
 #include <winrt/Windows.Security.Cryptography.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
+#include <winrt/Windows.Devices.Enumeration.h>
 
 
+using winrt::Windows::Devices::Enumeration::DeviceInformationPairing;
+using winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel;
+using winrt::Windows::Devices::Enumeration::DevicePairingResult;
+using winrt::Windows::Devices::Enumeration::DevicePairingResultStatus;
 using winrt::Windows::Devices::Bluetooth::BluetoothCacheMode;
 using winrt::Windows::Devices::Bluetooth::BluetoothConnectionStatus;
 using winrt::Windows::Devices::Bluetooth::BluetoothLEDevice;
@@ -382,6 +387,105 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
     // Update MTU value when it changes
     int mtu = session.MaxPduSize();
     mEmit.MTU(uuid, mtu);
+}
+
+bool BLEManager::Pair(const std::string& uuid)
+{
+    using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
+
+    IFDEVICE(device, uuid);
+
+    auto pairing = device.DeviceInformation().Pairing();
+
+    // Already bonded — report success immediately.
+    if (pairing.IsPaired())
+    {
+        mEmit.Paired(uuid, true);
+        return true;
+    }
+
+    if (!pairing.CanPair())
+    {
+        mEmit.Paired(uuid, false, "device reports it cannot be paired");
+        return true;
+    }
+
+    // Use custom pairing so we can auto-accept the ConfirmOnly (Just Works)
+    // ceremony without a UI prompt. The actual kind the device requests is
+    // logged so we can diagnose failures.
+    auto custom = pairing.Custom();
+    custom.PairingRequested(
+        [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
+           winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
+            auto kind = args.PairingKind();
+            LOGE("pairing requested, kind=%d", static_cast<int>(kind));
+            if (kind == DevicePairingKinds::ConfirmOnly)
+            {
+                args.Accept();
+            }
+        });
+
+    auto completed = bind2(this, &BLEManager::OnPaired, uuid);
+    custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
+        .Completed(completed);
+    return true;
+}
+
+std::string pairingResultStatusToString(DevicePairingResultStatus status)
+{
+    switch (status)
+    {
+        case DevicePairingResultStatus::Paired: return "Paired";
+        case DevicePairingResultStatus::NotReadyToPair: return "NotReadyToPair";
+        case DevicePairingResultStatus::NotPaired: return "NotPaired";
+        case DevicePairingResultStatus::AlreadyPaired: return "AlreadyPaired";
+        case DevicePairingResultStatus::ConnectionRejected: return "ConnectionRejected";
+        case DevicePairingResultStatus::TooManyConnections: return "TooManyConnections";
+        case DevicePairingResultStatus::HardwareFailure: return "HardwareFailure";
+        case DevicePairingResultStatus::AuthenticationTimeout: return "AuthenticationTimeout";
+        case DevicePairingResultStatus::AuthenticationNotAllowed: return "AuthenticationNotAllowed";
+        case DevicePairingResultStatus::AuthenticationFailure: return "AuthenticationFailure";
+        case DevicePairingResultStatus::NoSupportedProfiles: return "NoSupportedProfiles";
+        case DevicePairingResultStatus::ProtectionLevelCouldNotBeMet:
+            return "ProtectionLevelCouldNotBeMet";
+        case DevicePairingResultStatus::AccessDenied: return "AccessDenied";
+        case DevicePairingResultStatus::InvalidCeremonyData: return "InvalidCeremonyData";
+        case DevicePairingResultStatus::PairingCanceled: return "PairingCanceled";
+        case DevicePairingResultStatus::OperationAlreadyInProgress:
+            return "OperationAlreadyInProgress";
+        case DevicePairingResultStatus::RequiredHandlerNotRegistered:
+            return "RequiredHandlerNotRegistered";
+        case DevicePairingResultStatus::RejectedByHandler: return "RejectedByHandler";
+        case DevicePairingResultStatus::RemoteDeviceHasAssociation:
+            return "RemoteDeviceHasAssociation";
+        case DevicePairingResultStatus::Failed: return "Failed";
+        default:
+            return "Unknown(" + std::to_string(static_cast<int>(status)) + ")";
+    }
+}
+
+void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncStatus status,
+                          const std::string uuid)
+{
+    if (status != AsyncStatus::Completed)
+    {
+        mEmit.Paired(uuid, false, "pairing operation " + asyncStatusToString(status));
+        return;
+    }
+
+    auto result = asyncOp.GetResults();
+    auto resultStatus = result.Status();
+    LOGE("pairing result status=%s", pairingResultStatusToString(resultStatus).c_str());
+    if (resultStatus == DevicePairingResultStatus::Paired ||
+        resultStatus == DevicePairingResultStatus::AlreadyPaired)
+    {
+        mEmit.Paired(uuid, true);
+    }
+    else
+    {
+        mEmit.Paired(uuid, false,
+                     "pairing failed with status " + pairingResultStatusToString(resultStatus));
+    }
 }
 
 bool BLEManager::Disconnect(const std::string& uuid)
