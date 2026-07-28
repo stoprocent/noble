@@ -739,14 +739,20 @@ describe('noble', () => {
       const warningCallback = jest.fn();
       noble.on('warning', warningCallback);
 
+      // Ensure Noble#pair takes the supported-bindings path so completion waits
+       // for _onPair (mirrors native behavior on Windows).
+       mockBindings.pair = jest.fn();
+
       const completionCallback = jest.fn();
       noble.pair(peripheralUuid, completionCallback);
+      expect(completionCallback).not.toHaveBeenCalled();
+
       noble._onPair(peripheralUuid, false, new Error('device not connected'));
 
       expect(completionCallback).toHaveBeenCalledWith(expect.any(Error));
       expect(completionCallback).toHaveBeenCalledTimes(1);
       expect(warningCallback).toHaveBeenCalledWith(
-        'unknown peripheral aabbccddeeff paired!'
+        'unknown peripheral aabbccddeeff pair result received!'
       );
     });
   });

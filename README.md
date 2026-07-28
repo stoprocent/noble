@@ -402,7 +402,7 @@ peripheral.pair(error => { /* ... */ });
 
 // The pairing outcome is emitted on the peripheral, and (subject, error)
 // on Noble, mirroring other events.
-peripheral.on('pair', error => { /* error is undefined on success */ });
+peripheral.on('pair', error => { /* error is null on success */ });
 noble.on('pair', (peripheral, error) => { /* ... */ });
 ```
 
