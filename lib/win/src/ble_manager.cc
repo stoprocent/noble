@@ -420,11 +420,12 @@ bool BLEManager::Pair(const std::string& uuid)
     // ceremony without a UI prompt. The actual kind the device requests is
     // logged so we can diagnose failures.
     //
-    // The PairingRequested handler must Accept() or Reject() the args exactly
-    // once, otherwise the ceremony hangs until timeout. We auto-Accept only
-    // ConfirmOnly and reject every other kind (DisplayPin / ProvidePassword /
-    // ConfirmPinMatch etc.) since we have no way to surface a UI prompt from
-    // this library.
+    // The PairingRequested handler must Accept() the args exactly once for
+    // ConfirmOnly; for any other kind (DisplayPin / ProvidePassword /
+    // ConfirmPinMatch etc.) we simply return without Accept(), which Windows
+    // treats as a rejection and the PairAsync completes with the appropriate
+    // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
+    // no UI to surface a PIN or password prompt from this library.
     auto custom = pairing.Custom();
     auto token = custom.PairingRequested(
         [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
@@ -435,11 +436,8 @@ bool BLEManager::Pair(const std::string& uuid)
             {
                 args.Accept();
             }
-            else
-            {
-                LOGE("rejecting pairing: unsupported kind %d", static_cast<int>(kind));
-                args.Reject();
-            }
+            // Any other kind: do not call Accept() — Windows treats the
+            // handler returning as a rejection.
         });
 
     auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
