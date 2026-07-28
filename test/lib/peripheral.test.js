@@ -27,6 +27,7 @@ describe('peripheral', () => {
         });
       },
       connect: jest.fn(),
+      pair: jest.fn(),
       cancelConnect: jest.fn(),
       disconnect: jest.fn(),
       updateRssi: jest.fn(),
@@ -159,6 +160,56 @@ describe('peripheral', () => {
       await expect(promise).resolves.toBeUndefined();
       expect(mockNoble.connect).toHaveBeenCalledWith(mockId, options);
       expect(mockNoble.connect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('pair', () => {
+    test('should delegate to noble', () => {
+      peripheral.pair();
+
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should callback on success', () => {
+      const callback = jest.fn();
+
+      peripheral.pair(callback);
+      peripheral.emit('pair', null);
+
+      expect(callback).toHaveBeenCalledWith(null);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should callback on failure', () => {
+      const callback = jest.fn();
+      const error = new Error('pairing failed');
+
+      peripheral.pair(callback);
+      peripheral.emit('pair', error);
+
+      expect(callback).toHaveBeenCalledWith(error);
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('pairAsync', () => {
+    test('should resolve on success', async () => {
+      const promise = peripheral.pairAsync();
+      peripheral.emit('pair', null);
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject on error', async () => {
+      const promise = peripheral.pairAsync();
+      peripheral.emit('pair', new Error('pairing failed'));
+
+      await expect(promise).rejects.toThrow('pairing failed');
     });
   });
 

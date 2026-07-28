@@ -101,6 +101,16 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
+// pair(deviceUuid)
+Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    ARG1(String)
+    auto uuid = info[0].As<Napi::String>().Utf8Value();
+    manager->Pair(uuid);
+    return info.Env().Undefined();
+}
+
 // disconnect(deviceUuid)
 Napi::Value NobleWinrt::Disconnect(const Napi::CallbackInfo& info)
 {
@@ -315,6 +325,7 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
         NobleWinrt::InstanceMethod("startScanning", &NobleWinrt::Scan),
         NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
         NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
+        NobleWinrt::InstanceMethod("pair", &NobleWinrt::Pair),
         NobleWinrt::InstanceMethod("disconnect", &NobleWinrt::Disconnect),
         NobleWinrt::InstanceMethod("cancelConnect", &NobleWinrt::CancelConnect),
         NobleWinrt::InstanceMethod("updateRssi", &NobleWinrt::UpdateRSSI),

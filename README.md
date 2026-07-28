@@ -329,6 +329,9 @@ for await (const peripheral of noble.discoverAsync()) {
 // Connect directly to a peripheral by ID or address
 const peripheral = await noble.connectAsync(idOrAddress, options?);
 
+// Pair with a peripheral by ID or address (Windows only — see "Pairing" below)
+await noble.pairAsync(idOrAddress);
+
 // Set adapter address (HCI only on supported devices)
 noble.setAddress('00:11:22:33:44:55');
 
@@ -347,6 +350,9 @@ await peripheral.connectAsync();
 
 // Disconnect from peripheral
 await peripheral.disconnectAsync();
+
+// Pair with peripheral (Windows only — see "Pairing" below)
+await peripheral.pairAsync();
 
 // Update RSSI
 const rssi = await peripheral.updateRssiAsync();
@@ -381,6 +387,41 @@ peripheral.on('disconnect', reason => {
   console.log(`Disconnected: ${message}`);
 });
 ```
+
+### Pairing
+
+```typescript
+// Pair at the Noble level (by ID or address) or on a Peripheral instance.
+await noble.pairAsync(idOrAddress);
+// or
+await peripheral.pairAsync();
+
+// Callback form is also available on both.
+noble.pair(idOrAddress, error => { /* ... */ });
+peripheral.pair(error => { /* ... */ });
+
+// The pairing outcome is emitted on the peripheral, and (subject, error)
+// on Noble, mirroring other events.
+peripheral.on('pair', error => { /* error is undefined on success */ });
+noble.on('pair', (peripheral, error) => { /* ... */ });
+```
+
+**Platform support and limitations — please read before using pairing:**
+
+- **Windows only.** Pairing is implemented solely by the Windows (WinRT)
+  binding. On macOS, Linux, and other bindings `pair`/`pairAsync` does not
+  attempt a native call — it rejects/returns a deterministic
+  `'Pairing is not supported on this platform'` error so callers do not hang.
+- **A connected device is required.** The peripheral must already be
+  discovered and connected (present in Noble's peripheral map) before pairing
+  is requested. Pairing an unknown/untracked id fails rather than hanging.
+- **Only the `ConfirmOnly` ("Just Works") ceremony is supported.** The
+  handler auto-accepts `ConfirmOnly` requests without a UI prompt. Any other
+  ceremony (`DisplayPin`, `ProvidePassword`, `ConfirmPinMatch`, …) is **not**
+  accepted — this library has no UI to surface a PIN or password — and Windows
+  completes the operation with the corresponding failure status
+  (e.g. `RejectedByHandler` / `AuthenticationNotAllowed`), which is reported
+  back through the `pair` callback/event.
 
 ### Service Methods
 

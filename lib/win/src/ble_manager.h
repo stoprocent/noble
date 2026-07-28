@@ -2,6 +2,7 @@
 
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
+#include <winrt/Windows.Devices.Enumeration.h>
 
 #include "Emit.h"
 #include "notify_map.h"
@@ -21,6 +22,7 @@ public:
     void Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates);
     void StopScan();
     bool Connect(const std::string& uuid);
+    bool Pair(const std::string& uuid);
     bool Disconnect(const std::string& uuid);
     bool CancelConnect(const std::string& uuid);
     bool UpdateRSSI(const std::string& uuid);
@@ -43,6 +45,7 @@ private:
     void OnScanResult(BluetoothLEAdvertisementWatcher watcher, const BluetoothLEAdvertisementReceivedEventArgs& args);
     void OnScanStopped(BluetoothLEAdvertisementWatcher watcher, const BluetoothLEAdvertisementWatcherStoppedEventArgs& args);
     void OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status, std::string uuid);
+    void OnPaired(IAsyncOperation<winrt::Windows::Devices::Enumeration::DevicePairingResult> asyncOp, AsyncStatus status, std::string uuid, winrt::event_token token, winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing custom);
     void OnConnectionStatusChanged(BluetoothLEDevice device, winrt::Windows::Foundation::IInspectable inspectable);
     void OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, AsyncStatus status, std::string uuid);
     void OnMaxPduSizeChanged(GattSession session, winrt::Windows::Foundation::IInspectable object, std::string uuid);
