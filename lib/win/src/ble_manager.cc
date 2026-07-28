@@ -393,10 +393,16 @@ bool BLEManager::Pair(const std::string& uuid)
 {
     using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
 
-    IFDEVICE(device, uuid);
+    auto it = mDeviceMap.find(uuid);
+    if (it == mDeviceMap.end() || !it->second.device.has_value())
+    {
+        mEmit.Paired(uuid, false, "device not connected");
+        return true;
+    }
+
+    BluetoothLEDevice& device = *it->second.device;
 
     auto pairing = device.DeviceInformation().Pairing();
-
     // Already bonded — report success immediately.
     if (pairing.IsPaired())
     {
