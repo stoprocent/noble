@@ -413,8 +413,14 @@ bool BLEManager::Pair(const std::string& uuid)
     // Use custom pairing so we can auto-accept the ConfirmOnly (Just Works)
     // ceremony without a UI prompt. The actual kind the device requests is
     // logged so we can diagnose failures.
+    //
+    // The PairingRequested handler must Accept() or Reject() the args exactly
+    // once, otherwise the ceremony hangs until timeout. We auto-Accept only
+    // ConfirmOnly and reject every other kind (DisplayPin / ProvidePassword /
+    // ConfirmPinMatch etc.) since we have no way to surface a UI prompt from
+    // this library.
     auto custom = pairing.Custom();
-    custom.PairingRequested(
+    auto token = custom.PairingRequested(
         [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
            winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
             auto kind = args.PairingKind();
@@ -423,9 +429,14 @@ bool BLEManager::Pair(const std::string& uuid)
             {
                 args.Accept();
             }
+            else
+            {
+                LOGE("rejecting pairing: unsupported kind %d", static_cast<int>(kind));
+                args.Reject();
+            }
         });
 
-    auto completed = bind2(this, &BLEManager::OnPaired, uuid);
+    auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
     custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
         .Completed(completed);
     return true;
@@ -465,8 +476,15 @@ std::string pairingResultStatusToString(DevicePairingResultStatus status)
 }
 
 void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncStatus status,
-                          const std::string uuid)
+                          const std::string uuid,
+                          winrt::event_token token,
+                          winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing custom)
 {
+    // Revoke the PairingRequested handler now that pairing has settled; without
+    // this, a stray callback (e.g. if the device re-prompts) would call Accept/
+    // Reject on already-resolved args and could log confusing messages.
+    custom.PairingRequested(token);
+
     if (status != AsyncStatus::Completed)
     {
         mEmit.Paired(uuid, false, "pairing operation " + asyncStatusToString(status));
