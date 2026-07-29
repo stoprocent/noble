@@ -401,35 +401,51 @@ bool BLEManager::Pair(const std::string& uuid)
 
     BluetoothLEDevice& device = *it->second.device;
 
-    auto pairing = device.DeviceInformation().Pairing();
-    // Already bonded — report success immediately.
-    if (pairing.IsPaired())
-    {
-        mEmit.Paired(uuid, true);
-        return true;
-    }
-
-    if (!pairing.CanPair())
-    {
-        mEmit.Paired(uuid, false, "device reports it cannot be paired");
-        return true;
-    }
-
-    // Use custom pairing so we can auto-accept the ConfirmOnly (Just Works)
-    // ceremony without a UI prompt. The actual kind the device requests is
-    // logged so we can diagnose failures.
+    // The complete WinRT pairing sequence runs under one exception boundary.
+    // Each of the calls below (device.DeviceInformation().Pairing(),
+    // pairing.IsPaired(), pairing.CanPair(), pairing.Custom(), the handler
+    // registration, and PairAsync().Completed()) can throw winrt::hresult_error
+    // on bad device state, revoked instances, or RPC failure to the enumerator
+    // service. A throw from any of them that escapes Pair() would propagate out
+    // of the JS binding's QueuedEventRegistration::ForwardByBaton dispatch and
+    // tear down the node module — that's the crash we're guarding against.
     //
-    // The PairingRequested handler must Accept() the args exactly once for
-    // ConfirmOnly; for any other kind (DisplayPin / ProvidePassword /
-    // ConfirmPinMatch etc.) we simply return without Accept(), which Windows
-    // treats as a rejection and the PairAsync completes with the appropriate
-    // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
-    // no UI to surface a PIN or password prompt from this library.
-    auto custom = pairing.Custom();
+    // `custom`, `token`, and `handlerRegistered` are declared before the try so
+    // both catch blocks can see them. `custom` is null-initialised because it
+    // is reassigned by pairing.Custom() inside the try and must be safe to
+    // inspect in the catch. `handlerRegistered` gates the revocation so a throw
+    // before the handler is attached cannot dereference an invalid token.
+    DeviceInformationCustomPairing custom{nullptr};
     winrt::event_token token{};
     bool handlerRegistered = false;
     try
     {
+        auto pairing = device.DeviceInformation().Pairing();
+
+        // Already bonded — report success immediately.
+        if (pairing.IsPaired())
+        {
+            mEmit.Paired(uuid, true);
+            return true;
+        }
+
+        if (!pairing.CanPair())
+        {
+            mEmit.Paired(uuid, false, "device reports it cannot be paired");
+            return true;
+        }
+
+        // Use custom pairing so we can auto-accept the ConfirmOnly (Just Works)
+        // ceremony without a UI prompt. The actual kind the device requests is
+        // logged so we can diagnose failures.
+        //
+        // The PairingRequested handler must Accept() the args exactly once for
+        // ConfirmOnly; for any other kind (DisplayPin / ProvidePassword /
+        // ConfirmPinMatch etc.) we simply return without Accept(), which Windows
+        // treats as a rejection and the PairAsync completes with the appropriate
+        // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
+        // no UI to surface a PIN or password prompt from this library.
+        custom = pairing.Custom();
         token = custom.PairingRequested(
             [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
             winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
@@ -507,28 +523,51 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
     // Revoke the PairingRequested handler now that pairing has settled; without
     // this, a stray callback (e.g. if the device re-prompts) would call Accept/
     // Reject on already-resolved args and could log confusing messages. Best-effort
-    // (guarded like the revocation sites in Pair()): a throw here must not skip the
-    // pairing result emission below.
+    // (guarded like the revocation sites in Pair()): a throw here must not skip
+    // the pairing result emission below. This block deliberately stays outside
+    // the result-handling try because revocation should always run even when
+    // the result itself is unusable.
     try { custom.PairingRequested(token); } catch (...) {}
 
-    if (status != AsyncStatus::Completed)
+    // Everything below — status branching, asyncOp.GetResults(), result.Status(),
+    // logging that touches the status enum, and the final emission — can throw
+    // winrt::hresult_error (revoked asyncOp, marshalling failures) or a standard
+    // exception (e.g. formatBluetoothUuid-style misbehaviour surfacing a bad_alloc).
+    // A throw escaping OnPaired would propagate through the Completed() handler
+    // that JS bindings registered and terminate the node module. Wrap the whole
+    // result-handling tail in one try/catch so the consumer always gets a
+    // deterministic Paired(uuid, false, ...).
+    try
     {
-        mEmit.Paired(uuid, false, "pairing operation " + asyncStatusToString(status));
-        return;
-    }
+        if (status != AsyncStatus::Completed)
+        {
+            mEmit.Paired(uuid, false, "pairing operation " + asyncStatusToString(status));
+            return;
+        }
 
-    auto result = asyncOp.GetResults();
-    auto resultStatus = result.Status();
-    LOGE("pairing result status=%s", pairingResultStatusToString(resultStatus).c_str());
-    if (resultStatus == DevicePairingResultStatus::Paired ||
-        resultStatus == DevicePairingResultStatus::AlreadyPaired)
-    {
-        mEmit.Paired(uuid, true);
+        auto result = asyncOp.GetResults();
+        auto resultStatus = result.Status();
+        LOGE("pairing result status=%s", pairingResultStatusToString(resultStatus).c_str());
+        if (resultStatus == DevicePairingResultStatus::Paired ||
+            resultStatus == DevicePairingResultStatus::AlreadyPaired)
+        {
+            mEmit.Paired(uuid, true);
+        }
+        else
+        {
+            mEmit.Paired(uuid, false,
+                         "pairing failed with status " + pairingResultStatusToString(resultStatus));
+        }
     }
-    else
+    catch (const winrt::hresult_error& e)
     {
         mEmit.Paired(uuid, false,
-                     "pairing failed with status " + pairingResultStatusToString(resultStatus));
+                     "pairing result failed: " + winrt::to_string(e.message()));
+    }
+    catch (const std::exception& e)
+    {
+        mEmit.Paired(uuid, false,
+                     std::string("pairing result failed: ") + e.what());
     }
 }
 

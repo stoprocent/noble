@@ -60,7 +60,7 @@ declare module '@stoprocent/noble' {
          * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
          * Calls back with 'Pairing is not supported on this platform' elsewhere.
          */
-        pair(idOrAddress: PeripheralIdOrAddress, callback?: (error: Error | undefined) => void): void;
+        pair(idOrAddress: PeripheralIdOrAddress, callback?: (error: Error | null) => void): void;
         cancelConnect(idOrAddress: PeripheralIdOrAddress, options?: object): void;
         reset(): void;
         stop(): void;
@@ -70,14 +70,14 @@ declare module '@stoprocent/noble' {
         on(event: "scanStart", listener: () => void): this;
         on(event: "scanStop", listener: () => void): this;
         on(event: "discover", listener: (peripheral: Peripheral) => void): this;
-        on(event: "pair", listener: (peripheral: Peripheral, error: Error | undefined) => void): this;
+        on(event: "pair", listener: (peripheral: Peripheral, error: Error | null) => void): this;
         on(event: string, listener: Function): this;
 
         once(event: "stateChange", listener: (state: AdapterState) => void): this;
         once(event: "scanStart", listener: () => void): this;
         once(event: "scanStop", listener: () => void): this;
         once(event: "discover", listener: (peripheral: Peripheral) => void): this;
-        once(event: "pair", listener: (peripheral: Peripheral, error: Error | undefined) => void): this;
+        once(event: "pair", listener: (peripheral: Peripheral, error: Error | null) => void): this;
         once(event: string, listener: Function): this;
     
         removeListener(event: "stateChange", listener: (state: AdapterState) => void): this;
@@ -132,7 +132,7 @@ declare module '@stoprocent/noble' {
 
         connect(callback?: (error: Error | undefined) => void): void;
         /** Windows only; ConfirmOnly ("Just Works") ceremony only. */
-        pair(callback?: (error: Error | undefined) => void): void;
+        pair(callback?: (error: Error | null) => void): void;
         disconnect(callback?: () => void): void;
         updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
         discoverServices(): void;
@@ -146,7 +146,7 @@ declare module '@stoprocent/noble' {
         toString(): string;
     
         on(event: "connect", listener: (error: Error | undefined) => void): this;
-        on(event: "pair", listener: (error: Error | undefined) => void): this;
+        on(event: "pair", listener: (error: Error | null) => void): this;
         on(event: "disconnect", listener: (reason: DisconnectReason) => void): this;
         on(event: "rssiUpdate", listener: (rssi: number) => void): this;
         on(event: "servicesDiscover", listener: (services: Service[]) => void): this;
@@ -154,7 +154,7 @@ declare module '@stoprocent/noble' {
         on(event: string, listener: Function): this;
 
         once(event: "connect", listener: (error: Error | undefined) => void): this;
-        once(event: "pair", listener: (error: Error | undefined) => void): this;
+        once(event: "pair", listener: (error: Error | null) => void): this;
         once(event: "disconnect", listener: (reason: DisconnectReason) => void): this;
         once(event: "rssiUpdate", listener: (rssi: number) => void): this;
         once(event: "servicesDiscover", listener: (services: Service[]) => void): this;
