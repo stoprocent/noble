@@ -9,7 +9,6 @@
 #include <winrt/Windows.Devices.Enumeration.h>
 
 
-using winrt::Windows::Devices::Enumeration::DeviceInformationPairing;
 using winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel;
 using winrt::Windows::Devices::Enumeration::DevicePairingResult;
 using winrt::Windows::Devices::Enumeration::DevicePairingResultStatus;

@@ -680,6 +680,41 @@ describe('noble', () => {
     });
   });
 
+  describe('pairAsync', () => {
+    test('should resolve on success', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      mockBindings.pair = jest.fn();
+      noble._peripherals.set(peripheralUuid, { emit: jest.fn() });
+
+      const promise = noble.pairAsync(peripheralUuid);
+      noble._onPair(peripheralUuid, true);
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuid);
+    });
+
+    test('should reject on failure', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      mockBindings.pair = jest.fn();
+      noble._peripherals.set(peripheralUuid, { emit: jest.fn() });
+
+      const promise = noble.pairAsync(peripheralUuid);
+      noble._onPair(peripheralUuid, false, new Error('pairing failed'));
+
+      await expect(promise).rejects.toThrow('pairing failed');
+    });
+
+    test('should reject when pairing is unsupported by the bindings', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      // mockBindings deliberately has no pair() method (e.g. macOS/Linux).
+
+      const promise = noble.pairAsync(peripheralUuid);
+
+      await expect(promise).rejects.toThrow('Pairing is not supported on this platform');
+      expect(mockBindings.pair).toBeUndefined();
+    });
+  });
+
   describe('onPair', () => {
     test('should emit pair on existing peripheral (success)', () => {
       const emit = jest.fn();
