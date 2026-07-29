@@ -507,8 +507,10 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
 {
     // Revoke the PairingRequested handler now that pairing has settled; without
     // this, a stray callback (e.g. if the device re-prompts) would call Accept/
-    // Reject on already-resolved args and could log confusing messages.
-    custom.PairingRequested(token);
+    // Reject on already-resolved args and could log confusing messages. Best-effort
+    // (guarded like the revocation sites in Pair()): a throw here must not skip the
+    // pairing result emission below.
+    try { custom.PairingRequested(token); } catch (...) {}
 
     if (status != AsyncStatus::Completed)
     {
