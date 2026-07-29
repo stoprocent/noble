@@ -740,8 +740,8 @@ describe('noble', () => {
       noble.on('warning', warningCallback);
 
       // Ensure Noble#pair takes the supported-bindings path so completion waits
-       // for _onPair (mirrors native behavior on Windows).
-       mockBindings.pair = jest.fn();
+      // for _onPair (mirrors native behavior on Windows).
+      mockBindings.pair = jest.fn();
 
       const completionCallback = jest.fn();
       noble.pair(peripheralUuid, completionCallback);

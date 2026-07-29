@@ -427,22 +427,43 @@ bool BLEManager::Pair(const std::string& uuid)
     // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
     // no UI to surface a PIN or password prompt from this library.
     auto custom = pairing.Custom();
-    auto token = custom.PairingRequested(
-        [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
-           winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
-            auto kind = args.PairingKind();
-            LOGE("pairing requested, kind=%d", static_cast<int>(kind));
-            if (kind == DevicePairingKinds::ConfirmOnly)
-            {
-                args.Accept();
-            }
-            // Any other kind: do not call Accept() — Windows treats the
-            // handler returning as a rejection.
-        });
-
-    auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
-    custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
-        .Completed(completed);
+    winrt::event_token token{};
+    bool handlerRegistered = false;
+    try
+    {
+        token = custom.PairingRequested(
+            [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
+            winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
+                auto kind = args.PairingKind();
+                LOGE("pairing requested, kind=%d", static_cast<int>(kind));
+                if (kind == DevicePairingKinds::ConfirmOnly)
+                {
+                    args.Accept();
+                }
+                // Any other kind: do not call Accept() — Windows treats the
+                // handler returning as a rejection.
+            });
+        handlerRegistered = true;
+        auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
+        custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
+            .Completed(completed);
+    }
+    catch (const winrt::hresult_error& e)
+    {
+        if (handlerRegistered)
+        {
+            try { custom.PairingRequested(token); } catch (...) {}
+        }
+        mEmit.Paired(uuid, false, "pairing operation failed: " + winrt::to_string(e.message()));
+    }
+    catch (const std::exception& e)
+    {
+        if (handlerRegistered)
+        {
+            try { custom.PairingRequested(token); } catch (...) {}
+        }
+        mEmit.Paired(uuid, false, std::string("pairing operation failed: ") + e.what());
+    }
     return true;
 }
 
