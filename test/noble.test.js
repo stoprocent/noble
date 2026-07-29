@@ -642,6 +642,156 @@ describe('noble', () => {
     });
   });
 
+  describe('pair', () => {
+    test('should delegate to binding', () => {
+      const peripheralUuid = 'aabbccddeeff';
+
+      mockBindings.pair = jest.fn();
+      noble.pair(peripheralUuid);
+
+      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuid);
+      expect(mockBindings.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should fail synchronously when pairing is unsupported by the bindings', () => {
+      const peripheralUuid = 'aabbccddeeff';
+      // mockBindings deliberately has no pair() method (e.g. macOS/Linux).
+
+      const callback = jest.fn();
+      noble.pair(peripheralUuid, callback);
+
+      expect(callback).toHaveBeenCalledWith(expect.any(Error));
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(mockBindings.pair).toBeUndefined();
+    });
+
+    test('should emit the public pair event on the unsupported-platform path', () => {
+      const peripheralUuid = 'aabbccddeeff';
+      const peripheral = { emit: jest.fn() };
+      noble._peripherals.set(peripheralUuid, peripheral);
+      // mockBindings deliberately has no pair() method.
+
+      const pairListener = jest.fn();
+      noble.on('pair', pairListener);
+      noble.pair(peripheralUuid, () => {});
+
+      expect(pairListener).toHaveBeenCalledWith(peripheral, expect.any(Error));
+      expect(pairListener).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('pairAsync', () => {
+    test('should resolve on success', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      mockBindings.pair = jest.fn();
+      noble._peripherals.set(peripheralUuid, { emit: jest.fn() });
+
+      const promise = noble.pairAsync(peripheralUuid);
+      noble._onPair(peripheralUuid, true);
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuid);
+    });
+
+    test('should reject on failure', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      mockBindings.pair = jest.fn();
+      noble._peripherals.set(peripheralUuid, { emit: jest.fn() });
+
+      const promise = noble.pairAsync(peripheralUuid);
+      noble._onPair(peripheralUuid, false, new Error('pairing failed'));
+
+      await expect(promise).rejects.toThrow('pairing failed');
+    });
+
+    test('should reject when pairing is unsupported by the bindings', async () => {
+      const peripheralUuid = 'aabbccddeeff';
+      // mockBindings deliberately has no pair() method (e.g. macOS/Linux).
+
+      const promise = noble.pairAsync(peripheralUuid);
+
+      await expect(promise).rejects.toThrow('Pairing is not supported on this platform');
+      expect(mockBindings.pair).toBeUndefined();
+    });
+  });
+
+  describe('onPair', () => {
+    test('should emit pair on existing peripheral (success)', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('aabbccddeeff', { emit });
+
+      const warningCallback = jest.fn();
+      noble.on('warning', warningCallback);
+      noble._onPair('aabbccddeeff', true);
+
+      expect(emit).toHaveBeenCalledWith('pair', null);
+      expect(warningCallback).not.toHaveBeenCalled();
+    });
+
+    test('should emit pair failure on existing peripheral', () => {
+      const emit = jest.fn();
+      noble._peripherals.set('aabbccddeeff', { emit });
+      const error = new Error('pairing failed');
+
+      const warningCallback = jest.fn();
+      noble.on('warning', warningCallback);
+      noble._onPair('aabbccddeeff', false, error);
+
+      expect(emit).toHaveBeenCalledWith('pair', error);
+      expect(warningCallback).not.toHaveBeenCalled();
+    });
+
+    test('should emit the public Noble pair event on success', () => {
+      const peripheral = { emit: jest.fn() };
+      noble._peripherals.set('aabbccddeeff', peripheral);
+
+      const pairListener = jest.fn();
+      noble.on('pair', pairListener);
+      noble._onPair('aabbccddeeff', true);
+
+      expect(pairListener).toHaveBeenCalledWith(peripheral, null);
+      expect(pairListener).toHaveBeenCalledTimes(1);
+    });
+
+    test('should emit the public Noble pair event on failure', () => {
+      const peripheral = { emit: jest.fn() };
+      noble._peripherals.set('aabbccddeeff', peripheral);
+      const error = new Error('pairing failed');
+
+      const pairListener = jest.fn();
+      noble.on('pair', pairListener);
+      noble._onPair('aabbccddeeff', false, error);
+
+      expect(pairListener).toHaveBeenCalledWith(peripheral, error);
+      expect(pairListener).toHaveBeenCalledTimes(1);
+    });
+
+    test('should release the completion callback even for an untracked peripheral', () => {
+      // Regression: Noble#pair registers pair:${id}; if the native side
+      // completes pairing for an id that is not in _peripherals, the
+      // completion callback must still fire rather than hang forever.
+      const peripheralUuid = 'aabbccddeeff';
+      const warningCallback = jest.fn();
+      noble.on('warning', warningCallback);
+
+      // Ensure Noble#pair takes the supported-bindings path so completion waits
+      // for _onPair (mirrors native behavior on Windows).
+      mockBindings.pair = jest.fn();
+
+      const completionCallback = jest.fn();
+      noble.pair(peripheralUuid, completionCallback);
+      expect(completionCallback).not.toHaveBeenCalled();
+
+      noble._onPair(peripheralUuid, false, new Error('device not connected'));
+
+      expect(completionCallback).toHaveBeenCalledWith(expect.any(Error));
+      expect(completionCallback).toHaveBeenCalledTimes(1);
+      expect(warningCallback).toHaveBeenCalledWith(
+        'unknown peripheral aabbccddeeff pair result received!'
+      );
+    });
+  });
+
   describe('onDiscover', () => {
     test('should add new peripheral', () => {
       const uuid = 'uuid';

@@ -27,6 +27,7 @@ describe('peripheral', () => {
         });
       },
       connect: jest.fn(),
+      pair: jest.fn(),
       cancelConnect: jest.fn(),
       disconnect: jest.fn(),
       updateRssi: jest.fn(),
@@ -159,6 +160,75 @@ describe('peripheral', () => {
       await expect(promise).resolves.toBeUndefined();
       expect(mockNoble.connect).toHaveBeenCalledWith(mockId, options);
       expect(mockNoble.connect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('pair', () => {
+    test('should delegate to noble, forwarding the callback', () => {
+      peripheral.pair();
+
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should release the callback via Noble#pair (success)', () => {
+      const callback = jest.fn();
+
+      peripheral.pair(callback);
+
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, callback);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+
+      // Noble releases the delegated callback through the internal pair:${id}
+      // event, so drive the callback it received rather than the peripheral.
+      mockNoble.pair.mock.calls[0][1](null);
+      expect(callback).toHaveBeenCalledWith(null);
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    test('should release the callback via Noble#pair (failure)', () => {
+      const callback = jest.fn();
+      const error = new Error('pairing failed');
+
+      peripheral.pair(callback);
+      mockNoble.pair.mock.calls[0][1](error);
+
+      expect(callback).toHaveBeenCalledWith(error);
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    test('should not hang on the peripheral pair event after removal', () => {
+      // Regression: the callback used to be registered on the peripheral 'pair'
+      // event, which Noble only emits while the peripheral is tracked. If
+      // pairing completes after cleanup (peripheral removed from Noble's map),
+      // that registration never fired and the callback hung forever. The
+      // callback is now owned by Noble#pair via pair:${id}.
+      const callback = jest.fn();
+      peripheral.pair(callback);
+
+      peripheral.emit('pair', new Error('late completion after removal'));
+      expect(callback).not.toHaveBeenCalled();
+
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, callback);
+    });
+  });
+
+  describe('pairAsync', () => {
+    test('should resolve on success', async () => {
+      const promise = peripheral.pairAsync();
+      // Noble releases the delegated callback via pair:${id}; simulate it.
+      mockNoble.pair.mock.calls[0][1](null);
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, expect.any(Function));
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject on error', async () => {
+      const promise = peripheral.pairAsync();
+      mockNoble.pair.mock.calls[0][1](new Error('pairing failed'));
+
+      await expect(promise).rejects.toThrow('pairing failed');
     });
   });
 
