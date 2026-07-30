@@ -239,25 +239,91 @@ describe('hci-socket hci', () => {
       assert.notCalled(callback);
     });
 
-    it('should emit stateChange', () => {
-      hci._socket.isDevUp.returns(false);
+    it('should keep exactly one pending timer no matter how many times it is invoked within the same tick', () => {
+      hci._isStarted = true;
+      hci._socket.isDevUp.returns(true);
+      hci._isDevUp = true;
+
+      for (let i = 0; i < 10; i++) {
+        hci.pollIsDevUp();
+      }
+
+      should(sinon.clock.countTimers()).equal(1);
+    });
+
+    it('should keep polling normally across ticks with a single timer', () => {
+      hci._isStarted = true;
+      hci._socket.isDevUp.returns(true);
       hci._isDevUp = true;
 
       hci.pollIsDevUp();
+      should(sinon.clock.countTimers()).equal(1);
+
+      sinon.clock.tick(1000);
+      should(sinon.clock.countTimers()).equal(1);
+
+      sinon.clock.tick(1000);
+      should(sinon.clock.countTimers()).equal(1);
+    });
+
+    it('should not re-arm the poll timer after stop()', () => {
+      hci._socket.stop = sinon.spy();
+      hci._isStarted = true;
+      hci._socket.isDevUp.returns(true);
+      hci._isDevUp = true;
+
+      hci.pollIsDevUp();
+      should(sinon.clock.countTimers()).equal(1);
+
+      hci.stop();
+      should(sinon.clock.countTimers()).equal(0);
+
+      sinon.clock.tick(1000);
+      should(sinon.clock.countTimers()).equal(0);
+      assert.notCalled(hci.init);
+    });
+
+    it('should re-initialise after a genuine power-off followed by power-on', () => {
+      hci._state = 'poweredOn';
+      hci._isDevUp = true;
+
+      hci._socket.isDevUp.returns(false);
+      hci.pollIsDevUp();
 
       assert.calledOnceWithExactly(callback, 'poweredOff');
+      should(hci._state).equal('poweredOff');
 
-      assert.notCalled(hci._socket.removeAllListeners);
-      assert.notCalled(hci.init);
-      assert.notCalled(hci.setSocketFilter);
-      assert.notCalled(hci.setEventMask);
-      assert.notCalled(hci.setLeEventMask);
-      assert.notCalled(hci.readLocalVersion);
-      assert.notCalled(hci.writeLeHostSupported);
-      assert.notCalled(hci.readLeHostSupported);
-      assert.notCalled(hci.readLeBufferSize);
-      assert.notCalled(hci.readBdAddr);
-      assert.notCalled(hci.setCodedPhySupport);
+      hci._socket.isDevUp.returns(true);
+      hci.pollIsDevUp();
+
+      assert.calledOnceWithExactly(hci._socket.removeAllListeners);
+      assert.calledOnceWithExactly(hci.init);
+      should(hci._state).equal(null);
+    });
+
+    it('should end up with exactly one pending timer once init() re-enters pollIsDevUp during recovery', () => {
+      hci.init = Hci.prototype.init;
+      hci._isStarted = true;
+      hci._state = 'poweredOff';
+      hci._isDevUp = false;
+      hci._socket.isDevUp.returns(true);
+
+      hci.pollIsDevUp();
+
+      should(sinon.clock.countTimers()).equal(1);
+    });
+
+    it('should still leave a pending poll timer when init() throws during recovery', () => {
+      hci.init = Hci.prototype.init;
+      hci._isStarted = true;
+      hci._state = 'poweredOff';
+      hci._isDevUp = false;
+      hci._socket.isDevUp.returns(true);
+      hci._socket.start = sinon.stub().throws(new Error('boom'));
+
+      hci.pollIsDevUp();
+
+      should(sinon.clock.countTimers()).equal(1);
     });
   });
 
@@ -276,9 +342,81 @@ describe('hci-socket hci', () => {
     assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 1, 0x0c, 0x08, 0xff, 0xff, 0xfb, 0xff, 0x07, 0xf8, 0xbf, 0x3d]));
   });
 
-  it('should reset', () => {
-    hci.reset();
-    assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 3, 0x0c, 0]));
+  describe('reset', () => {
+    it('should write the reset command when no ACL connections are active', () => {
+      hci.reset();
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 3, 0x0c, 0]));
+    });
+
+    it('should not write the reset command while an ACL connection is active, but still emit reset and run the post-reset chain', () => {
+      hci.setEventMask = sinon.spy();
+      hci.setLeEventMask = sinon.spy();
+      hci.readLocalVersion = sinon.spy();
+      hci.readBdAddr = sinon.spy();
+      const resetCallback = sinon.spy();
+      hci.on('reset', resetCallback);
+
+      hci._aclConnections.set(4404, { pending: 0 });
+
+      hci.reset();
+
+      assert.notCalled(hci._socket.write);
+      assert.calledOnceWithExactly(hci.setEventMask);
+      assert.calledOnceWithExactly(hci.setLeEventMask);
+      assert.calledOnceWithExactly(hci.readLocalVersion);
+      assert.calledOnceWithExactly(hci.readBdAddr);
+      assert.calledOnce(resetCallback);
+    });
+
+    it('should still reach createLeConnAfterReset via createLeConn while an ACL connection is active', () => {
+      hci.setEventMask = sinon.spy();
+      hci.setLeEventMask = sinon.spy();
+      hci.readLocalVersion = sinon.spy();
+      hci.readBdAddr = sinon.spy();
+      hci.createLeConnAfterReset = sinon.spy();
+      hci._aclConnections.set(4404, { pending: 0 });
+
+      const address = 'aa:bb:cc:dd:ee:ff';
+      const addressType = 'random';
+      const parameters = { minInterval: 0x0060, maxInterval: 0x00c0 };
+
+      hci.createLeConn(address, addressType, parameters, true);
+
+      assert.notCalled(hci._socket.write);
+      assert.calledOnceWithExactly(hci.createLeConnAfterReset, address, addressType, parameters);
+    });
+
+    it('should resume writing the reset command once the ACL connections are gone', () => {
+      hci.setEventMask = sinon.spy();
+      hci.setLeEventMask = sinon.spy();
+      hci.readLocalVersion = sinon.spy();
+      hci.readBdAddr = sinon.spy();
+
+      hci._aclConnections.set(4404, { pending: 0 });
+      hci.reset();
+      assert.notCalled(hci._socket.write);
+
+      hci._aclConnections.delete(4404);
+      hci.reset();
+
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 3, 0x0c, 0]));
+    });
+  });
+
+  describe('stop', () => {
+    it('should clear ACL bookkeeping so a subsequent reset() is not left permanently refused', () => {
+      hci._socket.stop = sinon.spy();
+      hci._aclConnections.set(4404, { pending: 0 });
+      hci._aclQueue.push({ handle: 4404, packet: Buffer.from([0x00]) });
+
+      hci.stop();
+
+      should(hci._aclConnections.size).equal(0);
+      should(hci._aclQueue).be.empty();
+
+      hci.reset();
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 3, 0x0c, 0]));
+    });
   });
 
   it('should readSupportedCommands', () => {
@@ -540,6 +678,26 @@ describe('hci-socket hci', () => {
     ]);
   });
 
+  it('should not produce an unhandled rejection when stop() clears _aclConnections while writeAclDataPkt is in flight', async () => {
+    const handle = 4404;
+    const cid = 4;
+    const data = Buffer.from([1, 2, 3]);
+
+    hci._socket.stop = sinon.spy();
+    hci._aclConnections.set(handle, { pending: 0 });
+    jest.spyOn(hci, 'flushAcl');
+
+    const writePromise = hci.writeAclDataPkt(handle, cid, data);
+
+    hci.stop();
+    hci.setAclBuffers(20, 4);
+
+    await writePromise;
+
+    await expect(hci.flushAcl.mock.results[0].value).resolves.toBeUndefined();
+    should(hci._aclConnections.size).equal(0);
+  });
+
   describe('flushAcl', () => {
     it('should not write flush on no pending connections', () => {
       const queue = [
@@ -622,6 +780,27 @@ describe('hci-socket hci', () => {
       assert.calledWithExactly(hci._socket.write, Buffer.from([0x02, 0x34, 0x12, 0x03, 0x00, 0x09, 0x0a, 0x0b]));
       assert.calledWithExactly(hci._socket.write, Buffer.from([0x02]));
 
+      should(hci._aclQueue).be.empty();
+    });
+
+    it('should skip a queued packet whose connection is gone, without throwing, and keep draining the rest', async () => {
+      const queue = [
+        {
+          handle: 9999, // e.g. removed from _aclConnections by stop() while this was queued
+          packet: Buffer.from([0xff])
+        },
+        {
+          handle: 4660,
+          packet: Buffer.from([0x02, 0x34, 0x12, 0x08, 0x00, 0x07, 0x00, 0x59, 0x01, 0x05, 0x06, 0x07, 0x08])
+        }
+      ];
+      hci._aclQueue = [...queue];
+      hci._aclConnections.set(4660, { pending: 0 });
+      hci._aclBuffers = { num: 12 };
+
+      await hci.flushAcl();
+
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x02, 0x34, 0x12, 0x08, 0x00, 0x07, 0x00, 0x59, 0x01, 0x05, 0x06, 0x07, 0x08]));
       should(hci._aclQueue).be.empty();
     });
   });
@@ -1859,6 +2038,18 @@ describe('hci-socket hci', () => {
     should(hci._aclConnections.get(4404)).deepEqual({ pending: 0 });
   });
 
+  it('should emit leConnComplete but not record the connection on failed status', () => {
+    const status = 1;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]);
+    const callback = sinon.spy();
+
+    hci.on('leConnComplete', callback);
+    hci.processLeConnComplete(status, data);
+
+    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 322.5, 772, 20550, 9);
+    should(hci._aclConnections.size).equal(0);
+  });
+
   it('should emit leConnComplete on processLeEnhancedConnComplete', () => {
     const status = 0;
     const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
@@ -1952,6 +2143,18 @@ describe('hci-socket hci', () => {
     assert.notCalled(callback);
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('too short'));
     consoleSpy.mockRestore();
+  });
+
+  it('should still write reset after a failed connection-complete recorded no connection (regression: guard must not jam)', () => {
+    const status = 1;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]);
+
+    hci.processLeConnComplete(status, data);
+    should(hci._aclConnections.size).equal(0);
+
+    hci.reset();
+
+    assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 3, 0x0c, 0]));
   });
 
   describe('processLeAdvertisingReport', () => {
