@@ -125,6 +125,20 @@ describe('peripheral', () => {
       expect(mockNoble.connect).toHaveBeenCalledWith(mockId, options);
       expect(mockNoble.connect).toHaveBeenCalledTimes(1);
     });
+
+    test('coalesces a second call while already connecting', () => {
+      const firstCallback = jest.fn();
+      const secondCallback = jest.fn();
+
+      peripheral.connect(firstCallback);
+      peripheral.connect(secondCallback);
+
+      expect(mockNoble.connect).toHaveBeenCalledTimes(1);
+
+      peripheral.emit('connect');
+      expect(firstCallback).not.toHaveBeenCalled();
+      expect(secondCallback).toHaveBeenCalledWith(undefined);
+    });
   });
 
   describe('connectAsync', () => {

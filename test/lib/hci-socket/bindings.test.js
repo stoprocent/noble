@@ -251,6 +251,17 @@ describe('hci-socket bindings', () => {
       expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
     });
 
+    it('coalesces duplicate requests for the same peripheral', () => {
+      bindings._hci.createLeConn = jest.fn();
+
+      bindings.connect('112233445566', { mtu: 100 });
+      bindings.connect('112233445566', { mtu: 200 });
+
+      should(bindings._connectionQueue).have.length(1);
+      should(bindings._connectionQueue[0].params).deepEqual({ mtu: 100 });
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+    });
+
     it('missing peripheral, no queue, public address', () => {
       bindings._hci.createLeConn = jest.fn();
 
