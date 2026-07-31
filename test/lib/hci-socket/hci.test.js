@@ -422,7 +422,7 @@ describe('hci-socket hci', () => {
       hci.createLeConn(address, addressType, parameters, true);
 
       assert.notCalled(hci._socket.write);
-      assert.calledOnceWithExactly(hci.createLeConnAfterReset, address, addressType, parameters);
+      assert.calledOnceWithExactly(hci.createLeConnAfterReset, address, addressType, parameters, undefined);
     });
 
     it('should resume writing the reset command once the ACL connections are gone', () => {
@@ -603,13 +603,14 @@ describe('hci-socket hci', () => {
       const address = 'aa:bb:cc:dd:ee:ff';
       const addressType = 'random';
       const parameters = { minInterval: 0x0060, maxInterval: 0x00c0 };
+      const attemptToken = {};
       
       hci.createLeConnAfterReset = jest.fn();      
-      hci.createLeConn(address, addressType, parameters);
+      hci.createLeConn(address, addressType, parameters, true, attemptToken);
       hci.emit('reset');
 
       expect(hci.createLeConnAfterReset).toHaveBeenCalledWith(
-        address, addressType, parameters
+        address, addressType, parameters, attemptToken
       );
     });
   });
@@ -2138,6 +2139,37 @@ describe('hci-socket hci', () => {
     should(hci._aclConnections.size).equal(0);
   });
 
+  it('emits a non-zero-status all-zero connection completion with its attempt token', () => {
+    const status = 0x02;
+    const data = Buffer.alloc(17);
+    const callback = sinon.spy();
+    const attemptToken = {};
+    hci._pendingLeConn = {
+      address: '11:22:33:44:55:66',
+      addressType: 'random',
+      token: attemptToken
+    };
+
+    hci.on('leConnComplete', callback);
+    hci.processLeConnComplete(status, data);
+
+    assert.calledOnceWithExactly(
+      callback,
+      status,
+      0,
+      0,
+      'public',
+      '00:00:00:00:00:00',
+      0,
+      0,
+      0,
+      0,
+      undefined,
+      attemptToken
+    );
+    should(hci._pendingLeConn).equal(null);
+  });
+
   it('should not emit leConnComplete on processLeEnhancedConnComplete for an all-zero payload (garbage/truncated event guard)', () => {
     const status = 0;
     const data = Buffer.alloc(29);
@@ -2148,6 +2180,37 @@ describe('hci-socket hci', () => {
 
     assert.notCalled(callback);
     should(hci._aclConnections.size).equal(0);
+  });
+
+  it('emits a non-zero-status all-zero enhanced completion with its attempt token', () => {
+    const status = 0x02;
+    const data = Buffer.alloc(29);
+    const callback = sinon.spy();
+    const attemptToken = {};
+    hci._pendingLeConn = {
+      address: '11:22:33:44:55:66',
+      addressType: 'random',
+      token: attemptToken
+    };
+
+    hci.on('leConnComplete', callback);
+    hci.processLeEnhancedConnComplete(status, data);
+
+    assert.calledOnceWithExactly(
+      callback,
+      status,
+      0,
+      0,
+      'public',
+      '00:00:00:00:00:00',
+      0,
+      0,
+      0,
+      0,
+      '00:00:00:00:00:00',
+      attemptToken
+    );
+    should(hci._pendingLeConn).equal(null);
   });
 
   it('should not register an ACL connection when the completion reports a failure status', () => {
@@ -2394,6 +2457,12 @@ describe('hci-socket hci', () => {
 
       it(`should emit event - cmd = ${cmd}`, () => {
         const callback = sinon.spy();
+        const attemptToken = {};
+        hci._pendingLeConn = {
+          address: '11:22:33:44:55:66',
+          addressType: 'random',
+          token: attemptToken
+        };
         hci.on('leConnComplete', callback);
         hci.processCmdStatusEvent(cmd, 'status');
 
@@ -2402,13 +2471,16 @@ describe('hci-socket hci', () => {
           'status',
           undefined,
           undefined,
+          'random',
+          '11:22:33:44:55:66',
           undefined,
           undefined,
           undefined,
           undefined,
           undefined,
-          undefined
+          attemptToken
         );
+        should(hci._pendingLeConn).equal(null);
       });
     });
   });
