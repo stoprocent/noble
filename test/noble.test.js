@@ -503,6 +503,15 @@ describe('noble', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  test.each(['poweredOff', 'unauthorized', 'unsupported'])('should clean up when leaving poweredOn for %s', (state) => {
+    const cleanup = jest.spyOn(noble, '_cleanupPeriperals').mockImplementation(() => {});
+    noble._state = 'poweredOn';
+
+    noble._onStateChange(state);
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   describe('waitForPoweredOnAsync', () => {
     test('should resolve when state changes to poweredOn', async () => {
       // Set initial state to something other than poweredOn
@@ -1185,6 +1194,20 @@ describe('noble', () => {
       
       // Verify peripheral state was updated
       expect(peripheral.state).toBe('disconnected');
+    });
+
+    test('should not emit disconnect while cleaning up a failed connection', () => {
+      const peripheral = {
+        id: 'failed-peripheral',
+        state: 'error',
+        emit: jest.fn()
+      };
+      noble._peripherals.set(peripheral.id, peripheral);
+
+      noble._cleanupPeriperals(peripheral.id);
+
+      expect(peripheral.emit).not.toHaveBeenCalledWith('disconnect', expect.anything());
+      expect(noble._peripherals.has(peripheral.id)).toBe(false);
     });
   });
 
