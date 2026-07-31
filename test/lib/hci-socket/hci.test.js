@@ -1452,6 +1452,30 @@ describe('hci-socket hci', () => {
       hci.on('readLocalVersion', readLocalVersionCallback);
     });
 
+    it.each([
+      ['READ_LOCAL_VERSION_CMD', 4097],
+      ['READ_SUPPORTED_COMMANDS_CMD', 4098],
+      ['READ_BD_ADDR_CMD', 4105]
+    ])('does not read absent return parameters after a failed %s', (_name, cmd) => {
+      expect(() => hci.processCmdCompleteEvent(cmd, 0x0c, Buffer.alloc(0))).not.toThrow();
+
+      assert.notCalled(stateChangeCallback);
+      assert.notCalled(addressChangeCallback);
+      assert.notCalled(readLocalVersionCallback);
+    });
+
+    it.each([
+      ['READ_LOCAL_VERSION_CMD', 4097, 8],
+      ['READ_SUPPORTED_COMMANDS_CMD', 4098, 38],
+      ['READ_BD_ADDR_CMD', 4105, 6]
+    ])('does not read a truncated successful %s reply', (_name, cmd, minimumLength) => {
+      expect(() => hci.processCmdCompleteEvent(cmd, 0, Buffer.alloc(minimumLength - 1))).not.toThrow();
+
+      assert.notCalled(stateChangeCallback);
+      assert.notCalled(addressChangeCallback);
+      assert.notCalled(readLocalVersionCallback);
+    });
+
     it('should do nothing', () => {
       const cmd = 0;
       const status = 0;
