@@ -119,6 +119,7 @@ describe('hci-socket bindings', () => {
     should(bindings.scannable).deepEqual({});
 
     should(bindings._pendingConnectionUuid).eql(null);
+    should(bindings._pendingConnectionAddress).eql(null);
     should(bindings._connectionQueue).deepEqual([]);
 
     should(bindings._handles).deepEqual({});
@@ -967,7 +968,9 @@ describe('hci-socket bindings', () => {
 
       const connectCallback = jest.fn();
 
-      bindings._connectionQueue.push({ id: 'pending_uuid' });
+      bindings._connectionQueue.push({ id: 'pending_uuid', address });
+      bindings._pendingConnectionUuid = 'pending_uuid';
+      bindings._pendingConnectionAddress = bindings.addressToId(address);
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
@@ -992,7 +995,9 @@ describe('hci-socket bindings', () => {
 
       const connectCallback = jest.fn();
 
-      bindings._connectionQueue.push({ id: 'pending_uuid' });
+      bindings._connectionQueue.push({ id: 'pending_uuid', address });
+      bindings._pendingConnectionUuid = 'pending_uuid';
+      bindings._pendingConnectionAddress = bindings.addressToId(address);
       bindings.on('connect', connectCallback);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
@@ -1016,11 +1021,98 @@ describe('hci-socket bindings', () => {
       const addressType = 'random';
       const address = 'address:split:by:separator';
 
-      bindings._connectionQueue.push({ id: 'pending_uuid', params: { mtu: 100 } });
+      bindings._connectionQueue.push({ id: 'pending_uuid', address, params: { mtu: 100 } });
+      bindings._pendingConnectionUuid = 'pending_uuid';
+      bindings._pendingConnectionAddress = bindings.addressToId(address);
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
       expect(Gatt).toHaveBeenCalledWith(address, expect.anything(), 100);
       should(bindings._connectionQueue).length(0);
+    });
+
+    it('does not consume the in-flight attempt when a foreign connection completes', () => {
+      bindings._hci.createLeConn = jest.fn();
+      bindings._addresses = { pending_uuid: '11:22:33:44:55:66' };
+      bindings._addresseTypes = { pending_uuid: 'random' };
+      bindings.connect('pending_uuid', { mtu: 100 });
+
+      const connectCallback = jest.fn();
+      bindings.on('connect', connectCallback);
+
+      bindings.onLeConnComplete(0, 'foreign-handle', 0, 'random', 'aa:bb:cc:dd:ee:ff');
+
+      should(bindings._connectionQueue).length(1);
+      should(bindings._pendingConnectionUuid).equal('pending_uuid');
+      should(bindings._pendingConnectionAddress).equal('112233445566');
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+      expect(Gatt).toHaveBeenCalledWith('aa:bb:cc:dd:ee:ff', expect.anything(), undefined);
+      expect(connectCallback).toHaveBeenCalledWith('aabbccddeeff', null);
+    });
+
+    it('does not consume a queued entry when no connection attempt is in flight', () => {
+      bindings._connectionQueue.push({
+        id: 'pending_uuid',
+        address: '11:22:33:44:55:66',
+        addressType: 'random',
+        params: { mtu: 100 }
+      });
+
+      const connectCallback = jest.fn();
+      bindings.on('connect', connectCallback);
+
+      bindings.onLeConnComplete(0, 'foreign-handle', 0, 'random', '11:22:33:44:55:66');
+
+      should(bindings._connectionQueue).length(1);
+      should(bindings._pendingConnectionUuid).equal(null);
+      should(bindings._pendingConnectionAddress).equal(null);
+      expect(Gatt).toHaveBeenCalledWith('11:22:33:44:55:66', expect.anything(), undefined);
+      expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
+    });
+
+    it('matches an enhanced completion by its peer resolvable private address', () => {
+      bindings._hci.createLeConn = jest.fn();
+      bindings._addresses = { pending_uuid: 'aa:bb:cc:dd:ee:ff' };
+      bindings._addresseTypes = { pending_uuid: 'random' };
+      bindings.connect('pending_uuid', { mtu: 100 });
+
+      const connectCallback = jest.fn();
+      bindings.on('connect', connectCallback);
+
+      bindings.onLeConnComplete(
+        0,
+        'handle',
+        0,
+        'random',
+        '11:22:33:44:55:66',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'aa:bb:cc:dd:ee:ff'
+      );
+
+      should(bindings._connectionQueue).length(0);
+      should(bindings._pendingConnectionUuid).equal(null);
+      should(bindings._pendingConnectionAddress).equal(null);
+      expect(Gatt).toHaveBeenCalledWith('11:22:33:44:55:66', expect.anything(), 100);
+      expect(connectCallback).toHaveBeenCalledWith('pending_uuid', null);
+    });
+
+    it('does not fail the in-flight attempt for an unrelated failed completion', () => {
+      bindings._hci.createLeConn = jest.fn();
+      bindings._addresses = { pending_uuid: '11:22:33:44:55:66' };
+      bindings._addresseTypes = { pending_uuid: 'random' };
+      bindings.connect('pending_uuid');
+
+      const connectCallback = jest.fn();
+      bindings.on('connect', connectCallback);
+
+      bindings.onLeConnComplete(0x02, undefined, 0, 'random', 'aa:bb:cc:dd:ee:ff');
+
+      should(bindings._connectionQueue).length(1);
+      should(bindings._pendingConnectionUuid).equal('pending_uuid');
+      should(bindings._pendingConnectionAddress).equal('112233445566');
+      expect(connectCallback).not.toHaveBeenCalled();
     });
 
     it('with connection queue', () => {
@@ -1041,7 +1133,7 @@ describe('hci-socket bindings', () => {
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
       expect(connectCallback).toHaveBeenCalledTimes(1);
-      expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
+      expect(connectCallback).toHaveBeenCalledWith('queuedId_1', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
       expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
       expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
@@ -1070,7 +1162,7 @@ describe('hci-socket bindings', () => {
       bindings.onLeConnComplete(status, handle, role, addressType, address);
 
       expect(connectCallback).toHaveBeenCalledTimes(1);
-      expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
+      expect(connectCallback).toHaveBeenCalledWith('queuedId_1', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
       expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
       expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
@@ -1105,8 +1197,8 @@ describe('hci-socket bindings', () => {
 
       expect(connectCallback).toHaveBeenCalledTimes(2);
       
-      expect(connectCallback).toHaveBeenCalledWith('112233445566', null);
-      expect(connectCallback).toHaveBeenCalledWith('998877665544', null);
+      expect(connectCallback).toHaveBeenCalledWith('queuedId_1', null);
+      expect(connectCallback).toHaveBeenCalledWith('queuedId_2', null);
 
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(3);
       expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);

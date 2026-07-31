@@ -2121,7 +2121,7 @@ describe('hci-socket hci', () => {
     hci.on('leConnComplete', callback);
     hci.processLeEnhancedConnComplete(status, data);
 
-    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21);
+    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21, '0e:0d:0c:0b:0a:09');
     should(hci._aclConnections).keys(4404);
     should(hci._aclConnections.get(4404)).deepEqual({ pending: 0 });
   });
@@ -2170,7 +2170,7 @@ describe('hci-socket hci', () => {
     hci.on('leConnComplete', callback);
     hci.processLeEnhancedConnComplete(status, data);
 
-    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21);
+    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21, '0e:0d:0c:0b:0a:09');
     should(hci._aclConnections.size).equal(0);
   });
 
