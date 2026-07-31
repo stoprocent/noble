@@ -278,10 +278,93 @@ describe('hci-socket bindings', () => {
       bindings._pendingConnectionUuid = 'pending-uuid';
 
       bindings.connect('peripheralUuid', 'parameters');
-      
+
       should(bindings._connectionQueue).length(1);
       should(bindings._connectionQueue[0].id).eql('peripheralUuid');
       should(bindings._connectionQueue[0].params).eql('parameters');
+    });
+
+    // Characterization test: this also passes unmodified against main.
+    it('a connection already in flight blocks createLeConn until it completes', () => {
+      bindings._hci.createLeConn = jest.fn();
+      bindings._addresses = { peripheralA: '112233445566', peripheralB: '998877665544' };
+      bindings._addresseTypes = { peripheralA: 'random', peripheralB: 'public' };
+
+      bindings.connect('peripheralA', { addressType: 'random' });
+
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+
+      bindings.connect('peripheralB', { addressType: 'public' });
+
+      // Second connect() queued behind the in-flight first attempt.
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+      should(bindings._connectionQueue).length(2);
+
+      bindings.onLeConnComplete(0, 'handle-a', 0, 'random', '11:22:33:44:55:66');
+
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+    });
+
+    describe('regression: concurrent connects during a scan (issue #112)', () => {
+      it('two connects queued during scanning both reach createLeConn, one after the other completes', () => {
+        bindings._hci.createLeConn = jest.fn();
+        bindings._addresses = { peripheralA: '112233445566', peripheralB: '998877665544' };
+        bindings._addresseTypes = { peripheralA: 'random', peripheralB: 'public' };
+        bindings._isScanning = true;
+        bindings._isScanningStarted = true;
+
+        bindings.connect('peripheralA', { addressType: 'random' });
+        bindings.connect('peripheralB', { addressType: 'public' });
+
+        // Nothing may start while the scan hasn't actually stopped yet.
+        expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
+        should(bindings._connectionQueue).length(2);
+
+        // Simulate the hardware reporting that scanning has actually stopped.
+        bindings.onScanStop();
+
+        expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
+
+        bindings.onLeConnComplete(0, 'handle-a', 0, 'random', '11:22:33:44:55:66');
+
+        expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      });
+
+      it('does not strand the queue when scanning resumes (via startScanning/onScanStart) before the second entry starts', () => {
+        bindings._hci.createLeConn = jest.fn();
+        bindings._addresses = { peripheralA: '112233445566', peripheralB: '998877665544' };
+        bindings._addresseTypes = { peripheralA: 'random', peripheralB: 'public' };
+        bindings._isScanning = true;
+        bindings._isScanningStarted = true;
+
+        bindings.connect('peripheralA', { addressType: 'random' });
+        bindings.connect('peripheralB', { addressType: 'public' });
+
+        bindings.onScanStop();
+        expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+
+        // Drive scanning resumption through the same entry points a discovery
+        // loop uses (startScanning() then the gap's scanStart callback), not by
+        // poking _isScanningStarted directly.
+        bindings.startScanning();
+        bindings.onScanStart();
+
+        bindings.onLeConnComplete(0, 'handle-a', 0, 'random', '11:22:33:44:55:66');
+
+        // peripheralB must not start while scanning is active again.
+        expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+        should(bindings._connectionQueue).length(1);
+
+        // Scanning genuinely stops again; peripheralB must now proceed.
+        bindings.onScanStop();
+
+        expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
+        // peripheralA's handle is now registered (its leConnComplete already succeeded), so reset is false.
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      });
     });
   });
 
@@ -451,6 +534,26 @@ describe('hci-socket bindings', () => {
       expect(stateChange).toHaveBeenCalledWith('unsupported');
       expect(console.log).toHaveBeenCalledTimes(3);
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('adapter does not support Bluetooth'));
+    });
+
+    it('poweredOn -> poweredOff with an attempt in flight clears the queue and in-flight flag, and a later connect() starts normally (issue #112)', () => {
+      bindings._state = 'poweredOn';
+      bindings._connectionQueue.push({ id: 'queuedPeripheral', address: 'aa:aa:aa:aa:aa:aa', addressType: 'random', params: {} });
+      bindings._pendingConnectionUuid = 'queuedPeripheral';
+
+      bindings.onStateChange('poweredOff');
+
+      should(bindings._connectionQueue).length(0);
+      should(bindings._pendingConnectionUuid).equal(null);
+
+      bindings._hci.createLeConn = jest.fn();
+      bindings._addresses = { peripheralUuid: 'bb:bb:bb:bb:bb:bb' };
+      bindings._addresseTypes = { peripheralUuid: 'random' };
+      bindings.onStateChange('poweredOn');
+      bindings.connect('peripheralUuid', {});
+
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('bb:bb:bb:bb:bb:bb', 'random', {}, true);
     });
   });
 
@@ -778,6 +881,21 @@ describe('hci-socket bindings', () => {
         message: 'HCI Error: Unknown (0x2)' 
       }));
 
+      should(bindings._connectionQueue).length(0);
+    });
+
+    // Characterization test: this also passes unmodified against main.
+    it('reads the mtu from the queue head params before shifting it off', () => {
+      const status = 0;
+      const handle = 'handle';
+      const role = 0;
+      const addressType = 'random';
+      const address = 'address:split:by:separator';
+
+      bindings._connectionQueue.push({ id: 'pending_uuid', params: { mtu: 100 } });
+      bindings.onLeConnComplete(status, handle, role, addressType, address);
+
+      expect(Gatt).toHaveBeenCalledWith(address, expect.anything(), 100);
       should(bindings._connectionQueue).length(0);
     });
 
