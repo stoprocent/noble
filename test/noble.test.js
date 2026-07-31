@@ -352,6 +352,21 @@ describe('noble', () => {
       );
       expect(mockBindings.connect).toHaveBeenCalledTimes(1);
     });
+
+    test('rejects a direct connect for an already connected peripheral without changing its state', () => {
+      const callback = jest.fn();
+      const peripheral = { id: 'peripheral-uuid', state: 'connected', emit: jest.fn() };
+      noble._peripherals.set(peripheral.id, peripheral);
+      mockBindings.addressToId.mockReturnValue(peripheral.id);
+
+      noble.connect(peripheral.id, {}, callback);
+
+      expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'Peripheral already connected'
+      }), peripheral);
+      expect(mockBindings.connect).not.toHaveBeenCalled();
+      expect(peripheral.state).toBe('connected');
+    });
   });
 
   describe('onConnect', () => {
