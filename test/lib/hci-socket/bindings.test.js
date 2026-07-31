@@ -555,6 +555,84 @@ describe('hci-socket bindings', () => {
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
       expect(bindings._hci.createLeConn).toHaveBeenCalledWith('bb:bb:bb:bb:bb:bb', 'random', {}, true);
     });
+
+    it('poweredOn -> poweredOff disconnects all live connections exactly once without throwing', () => {
+      const disconnectCallback = jest.fn();
+      const gattSpy1 = { removeAllListeners: jest.fn() };
+      const signalingSpy1 = { removeAllListeners: jest.fn() };
+      const gattSpy2 = { removeAllListeners: jest.fn() };
+      const signalingSpy2 = { removeAllListeners: jest.fn() };
+      const aclStreamSpy1 = { push: jest.fn() };
+      const aclStreamSpy2 = { push: jest.fn() };
+
+      const handle1 = 1;
+      const handle2 = 2;
+      const uuid1 = 'uuid1';
+      const uuid2 = 'uuid2';
+
+      bindings._handles[uuid1] = handle1;
+      bindings._handles[handle1] = uuid1;
+      bindings._handles[uuid2] = handle2;
+      bindings._handles[handle2] = uuid2;
+
+      bindings._aclStreams[handle1] = aclStreamSpy1;
+      bindings._aclStreams[handle2] = aclStreamSpy2;
+      bindings._gatts[handle1] = gattSpy1;
+      bindings._gatts[uuid1] = gattSpy1;
+      bindings._gatts[handle2] = gattSpy2;
+      bindings._gatts[uuid2] = gattSpy2;
+      bindings._signalings[handle1] = signalingSpy1;
+      bindings._signalings[uuid1] = signalingSpy1;
+      bindings._signalings[handle2] = signalingSpy2;
+      bindings._signalings[uuid2] = signalingSpy2;
+
+      bindings._state = 'poweredOn';
+      bindings.on('disconnect', disconnectCallback);
+
+      expect(() => bindings.onStateChange('poweredOff')).not.toThrow();
+
+      expect(disconnectCallback).toHaveBeenCalledTimes(2);
+      expect(disconnectCallback).toHaveBeenCalledWith(uuid1, 0x03);
+      expect(disconnectCallback).toHaveBeenCalledWith(uuid2, 0x03);
+
+      expect(aclStreamSpy1.push).toHaveBeenCalledWith(null, null);
+      expect(aclStreamSpy2.push).toHaveBeenCalledWith(null, null);
+      expect(gattSpy1.removeAllListeners).toHaveBeenCalledTimes(1);
+      expect(gattSpy2.removeAllListeners).toHaveBeenCalledTimes(1);
+      expect(signalingSpy1.removeAllListeners).toHaveBeenCalledTimes(1);
+      expect(signalingSpy2.removeAllListeners).toHaveBeenCalledTimes(1);
+
+      should(bindings._handles).deepEqual({});
+      should(bindings._aclStreams).deepEqual({});
+      should(bindings._gatts).deepEqual({});
+      should(bindings._signalings).deepEqual({});
+    });
+
+    it('poweredOn -> poweredOff does not throw for a hypothetical uuid that would sort before its handle', () => {
+      // addressToId always yields a 12-hex-char uuid, never an array index, so this shape is unreachable via connect()
+      const disconnectCallback = jest.fn();
+      const gattSpy = { removeAllListeners: jest.fn() };
+      const signalingSpy = { removeAllListeners: jest.fn() };
+
+      const handle = 10;
+      const uuid = '1';
+
+      bindings._handles[uuid] = handle;
+      bindings._handles[handle] = uuid;
+      bindings._aclStreams[handle] = [];
+      bindings._gatts[handle] = gattSpy;
+      bindings._gatts[uuid] = gattSpy;
+      bindings._signalings[handle] = signalingSpy;
+      bindings._signalings[uuid] = signalingSpy;
+
+      bindings._state = 'poweredOn';
+      bindings.on('disconnect', disconnectCallback);
+
+      expect(() => bindings.onStateChange('poweredOff')).not.toThrow();
+
+      expect(disconnectCallback).toHaveBeenCalledTimes(1);
+      expect(disconnectCallback).toHaveBeenCalledWith(uuid, 0x03);
+    });
   });
 
   it('onAddressChange', () => {
