@@ -1847,7 +1847,7 @@ describe('hci-socket hci', () => {
   });
 
   it('should emit leConnComplete', () => {
-    const status = 'status';
+    const status = 0;
     const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]);
     const callback = sinon.spy();
 
@@ -1860,7 +1860,7 @@ describe('hci-socket hci', () => {
   });
 
   it('should emit leConnComplete on processLeEnhancedConnComplete', () => {
-    const status = 'status';
+    const status = 0;
     const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
     const callback = sinon.spy();
 
@@ -1870,6 +1870,88 @@ describe('hci-socket hci', () => {
     assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21);
     should(hci._aclConnections).keys(4404);
     should(hci._aclConnections.get(4404)).deepEqual({ pending: 0 });
+  });
+
+  it('should not emit leConnComplete for an all-zero payload (garbage/truncated event guard)', () => {
+    const status = 0;
+    const data = Buffer.alloc(17);
+    const callback = sinon.spy();
+
+    hci.on('leConnComplete', callback);
+    hci.processLeConnComplete(status, data);
+
+    assert.notCalled(callback);
+    should(hci._aclConnections.size).equal(0);
+  });
+
+  it('should not emit leConnComplete on processLeEnhancedConnComplete for an all-zero payload (garbage/truncated event guard)', () => {
+    const status = 0;
+    const data = Buffer.alloc(29);
+    const callback = sinon.spy();
+
+    hci.on('leConnComplete', callback);
+    hci.processLeEnhancedConnComplete(status, data);
+
+    assert.notCalled(callback);
+    should(hci._aclConnections.size).equal(0);
+  });
+
+  it('should not register an ACL connection when the completion reports a failure status', () => {
+    const status = 0x02;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]);
+    const callback = sinon.spy();
+
+    hci.on('leConnComplete', callback);
+    hci.processLeConnComplete(status, data);
+
+    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 322.5, 772, 20550, 9);
+    should(hci._aclConnections.size).equal(0);
+  });
+
+  it('should not register an ACL connection on processLeEnhancedConnComplete when the completion reports a failure status', () => {
+    const status = 0x02;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+    const callback = sinon.spy();
+
+    hci.on('leConnComplete', callback);
+    hci.processLeEnhancedConnComplete(status, data);
+
+    assert.calledOnceWithExactly(callback, status, 4404, 4, 'random', 'ff:ee:dd:cc:bb:aa', 5138.75, 4625, 51390, 21);
+    should(hci._aclConnections.size).equal(0);
+  });
+
+  it('should not throw and should reject a too-short payload for processLeConnComplete', () => {
+    // Non-zero payload, one byte short of the 17 the field reads require - the all-zero
+    // guard must not be the only thing standing between this and a RangeError.
+    const status = 0;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8]);
+    const callback = sinon.spy();
+    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    hci.on('leConnComplete', callback);
+
+    expect(() => hci.processLeConnComplete(status, data)).not.toThrow();
+
+    assert.notCalled(callback);
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('too short'));
+    consoleSpy.mockRestore();
+  });
+
+  it('should not throw and should reject a too-short payload for processLeEnhancedConnComplete', () => {
+    // Non-zero payload, one byte short of the 29 the field reads require - the all-zero
+    // guard must not be the only thing standing between this and a RangeError.
+    const status = 0;
+    const data = Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    const callback = sinon.spy();
+    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    hci.on('leConnComplete', callback);
+
+    expect(() => hci.processLeEnhancedConnComplete(status, data)).not.toThrow();
+
+    assert.notCalled(callback);
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('too short'));
+    consoleSpy.mockRestore();
   });
 
   describe('processLeAdvertisingReport', () => {
@@ -2049,7 +2131,18 @@ describe('hci-socket hci', () => {
         hci.on('leConnComplete', callback);
         hci.processCmdStatusEvent(cmd, 'status');
 
-        assert.calledOnceWithExactly(callback, 'status');
+        assert.calledOnceWithExactly(
+          callback,
+          'status',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined
+        );
       });
     });
   });
