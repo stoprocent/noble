@@ -120,6 +120,8 @@ describe('hci-socket bindings', () => {
 
     should(bindings._pendingConnectionUuid).eql(null);
     should(bindings._pendingConnectionAddress).eql(null);
+    should(bindings._pendingConnectionToken).eql(null);
+    should(bindings._cancelledConnectionUuid).eql(null);
     should(bindings._connectionQueue).deepEqual([]);
 
     should(bindings._handles).deepEqual({});
@@ -259,7 +261,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql({ addressType: 'public' });
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('11:22:33:44:55:66', 'public', { addressType: 'public' }, true);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('11:22:33:44:55:66', 'public', { addressType: 'public' }, true, expect.anything());
     });
 
     it('missing peripheral, no queue, random address', () => {
@@ -272,7 +274,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql({ addressType: 'random' });
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('f3:22:33:44:55:66', 'random', { addressType: 'random' }, true);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('f3:22:33:44:55:66', 'random', { addressType: 'random' }, true, expect.anything());
     });
 
     it('existing peripheral, no queue', () => {
@@ -291,7 +293,7 @@ describe('hci-socket bindings', () => {
       should(bindings._connectionQueue[0].params).eql('parameters');
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('address', 'addressType', 'parameters', true);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('address', 'addressType', 'parameters', true, expect.anything());
     });
 
     it('missing peripheral, with queue', () => {
@@ -323,7 +325,7 @@ describe('hci-socket bindings', () => {
       bindings.onLeConnComplete(0, 'handle-a', 0, 'random', '11:22:33:44:55:66');
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
     });
 
     describe('regression: concurrent connects during a scan (issue #112)', () => {
@@ -345,12 +347,12 @@ describe('hci-socket bindings', () => {
         bindings.onScanStop();
 
         expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true, expect.anything());
 
         bindings.onLeConnComplete(0, 'handle-a', 0, 'random', '11:22:33:44:55:66');
 
         expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
-        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
       });
 
       it('does not strand the queue when scanning resumes (via startScanning/onScanStart) before the second entry starts', () => {
@@ -383,7 +385,7 @@ describe('hci-socket bindings', () => {
 
         expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
         // peripheralA's handle is now registered (its leConnComplete already succeeded), so reset is false.
-        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+        expect(bindings._hci.createLeConn).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
       });
     });
   });
@@ -439,6 +441,56 @@ describe('hci-socket bindings', () => {
 
       expect(bindings._hci.cancelConnect).toHaveBeenCalledTimes(1);
       expect(bindings._hci.cancelConnect).toHaveBeenCalledWith('handle');
+    });
+
+    it('waits for the cancelled attempt completion before starting the next peer', () => {
+      bindings._hci.createLeConn = jest.fn();
+      bindings._hci.cancelConnect = jest.fn();
+      bindings._state = 'poweredOn';
+      bindings._addresses = {
+        peripheralA: '11:22:33:44:55:66',
+        peripheralB: '99:88:77:66:55:44'
+      };
+      bindings._addresseTypes = { peripheralA: 'random', peripheralB: 'public' };
+
+      bindings.connect('peripheralA');
+      bindings.connect('peripheralB');
+      const cancelledToken = bindings._pendingConnectionToken;
+
+      bindings.cancelConnect('peripheralA');
+
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
+      should(bindings._connectionQueue).length(1);
+      should(bindings._pendingConnectionUuid).equal('peripheralA');
+      should(bindings._cancelledConnectionUuid).equal('peripheralA');
+
+      const connectCallback = jest.fn();
+      bindings.on('connect', connectCallback);
+      bindings.onLeConnComplete(
+        0x02,
+        0,
+        0,
+        'public',
+        '00:00:00:00:00:00',
+        0,
+        0,
+        0,
+        0,
+        undefined,
+        cancelledToken
+      );
+
+      expect(connectCallback).not.toHaveBeenCalled();
+      expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(2);
+      expect(bindings._hci.createLeConn).toHaveBeenLastCalledWith(
+        '99:88:77:66:55:44',
+        'public',
+        {},
+        true,
+        expect.anything()
+      );
+      should(bindings._pendingConnectionUuid).equal('peripheralB');
+      should(bindings._cancelledConnectionUuid).equal(null);
     });
   });
 
@@ -573,7 +625,7 @@ describe('hci-socket bindings', () => {
       bindings.connect('peripheralUuid', {});
 
       expect(bindings._hci.createLeConn).toHaveBeenCalledTimes(1);
-      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('bb:bb:bb:bb:bb:bb', 'random', {}, true);
+      expect(bindings._hci.createLeConn).toHaveBeenCalledWith('bb:bb:bb:bb:bb:bb', 'random', {}, true, expect.anything());
     });
 
     it('poweredOn -> poweredOff disconnects all live connections exactly once without throwing', () => {
@@ -1135,8 +1187,8 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledTimes(1);
       expect(connectCallback).toHaveBeenCalledWith('queuedId_1', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true, expect.anything());
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
 
       should(bindings._connectionQueue).length(1);
     });
@@ -1164,8 +1216,8 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledTimes(1);
       expect(connectCallback).toHaveBeenCalledWith('queuedId_1', null);
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(2);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true, expect.anything());
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
       expect(bindings._connectionQueue).toHaveLength(2);
     });
 
@@ -1201,9 +1253,9 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledWith('queuedId_2', null);
 
       expect(Hci.createLeConnSpy).toHaveBeenCalledTimes(3);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false);
-      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('aabbccddeeff', 'random', { addressType: 'random' }, false);
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('112233445566', 'random', { addressType: 'random' }, true, expect.anything());
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('998877665544', 'public', { addressType: 'public' }, false, expect.anything());
+      expect(Hci.createLeConnSpy).toHaveBeenCalledWith('aabbccddeeff', 'random', { addressType: 'random' }, false, expect.anything());
       expect(bindings._connectionQueue).toHaveLength(1);
     });
   });
