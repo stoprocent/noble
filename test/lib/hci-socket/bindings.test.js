@@ -229,6 +229,25 @@ describe('hci-socket bindings', () => {
   });
 
   describe('connect', () => {
+    beforeEach(() => {
+      bindings._state = 'poweredOn';
+    });
+
+    it('rejects while the adapter is not poweredOn without queueing or writing', () => {
+      const connectCallback = jest.fn();
+      bindings._state = 'poweredOff';
+      bindings._hci.createLeConn = jest.fn();
+      bindings.on('connect', connectCallback);
+
+      bindings.connect('112233445566');
+
+      expect(connectCallback).toHaveBeenCalledWith('112233445566', expect.objectContaining({
+        message: expect.stringContaining('poweredOff')
+      }));
+      should(bindings._connectionQueue).be.empty();
+      expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
+    });
+
     it('missing peripheral, no queue, public address', () => {
       bindings._hci.createLeConn = jest.fn();
 
@@ -633,6 +652,29 @@ describe('hci-socket bindings', () => {
       expect(disconnectCallback).toHaveBeenCalledTimes(1);
       expect(disconnectCallback).toHaveBeenCalledWith(uuid, 0x03);
     });
+
+    it.each(['poweredOff', 'unauthorized', 'unsupported'])('clears queued attempts when leaving poweredOn for %s', (state) => {
+      bindings._state = 'poweredOn';
+      bindings._connectionQueue = [{ id: 'pending' }, { id: 'queued' }];
+      bindings._pendingConnectionUuid = 'pending';
+      jest.spyOn(console, 'log').mockImplementation(() => {});
+
+      bindings.onStateChange(state);
+
+      should(bindings._connectionQueue).be.empty();
+      should(bindings._pendingConnectionUuid).equal(null);
+    });
+
+    it('sets the unavailable state before notifying listeners, so a synchronous retry cannot write', () => {
+      bindings._state = 'poweredOn';
+      bindings._hci.createLeConn = jest.fn();
+      bindings.on('stateChange', () => bindings.connect('112233445566'));
+
+      bindings.onStateChange('poweredOff');
+
+      expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
+      should(bindings._connectionQueue).be.empty();
+    });
   });
 
   it('onAddressChange', () => {
@@ -850,6 +892,10 @@ describe('hci-socket bindings', () => {
   });
 
   describe('onLeConnComplete', () => {
+    beforeEach(() => {
+      bindings._state = 'poweredOn';
+    });
+
     it('not on master node', () => {
       const status = 1;
       const handle = 'handle';
