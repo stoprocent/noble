@@ -43,6 +43,7 @@ jest.mock('../../../lib/hci-socket/hci', () => {
   hciMock.prototype.init = jest.fn();
   hciMock.prototype.setAddress = jest.fn().mockResolvedValue(null);
   hciMock.prototype.reset = jest.fn().mockResolvedValue(null);
+  hciMock.prototype.isUserChannel = jest.fn();
   
   // Add STATUS_MAPPER to the constructor
   hciMock.STATUS_MAPPER = { 1: 'custom mapper' };
@@ -93,7 +94,9 @@ describe('hci-socket bindings', () => {
     
     // Reset all mock state
     jest.clearAllMocks();
-    
+    // clearAllMocks() doesn't clear mockReturnValue - reassert so it can't leak across tests.
+    Hci.prototype.isUserChannel.mockReturnValue(false);
+
     // Mock timing functions
     jest.useFakeTimers();
     
@@ -249,6 +252,21 @@ describe('hci-socket bindings', () => {
       }));
       should(bindings._connectionQueue).be.empty();
       expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
+    });
+
+    it('does not overlap a user-channel initialization reset with a connect reset', () => {
+      bindings._state = null;
+      bindings._hci.isUserChannel.mockReturnValue(true);
+      bindings._hci.reset = jest.fn();
+      bindings._hci.createLeConn = jest.fn();
+
+      // Model the reset already issued by Hci.init() before poweredOn.
+      bindings._hci.reset();
+      bindings.connect('112233445566');
+
+      expect(bindings._hci.reset).toHaveBeenCalledTimes(1);
+      expect(bindings._hci.createLeConn).not.toHaveBeenCalled();
+      should(bindings._connectionQueue).be.empty();
     });
 
     it('coalesces duplicate requests for the same peripheral', () => {
@@ -992,6 +1010,7 @@ describe('hci-socket bindings', () => {
       expect(AclStream).toHaveBeenCalledTimes(1);
       expect(Gatt).toHaveBeenCalledTimes(1);
       expect(Signaling).toHaveBeenCalledTimes(1);
+      expect(Signaling).toHaveBeenCalledWith(handle, expect.anything(), false);
 
       expect(Gatt.onMock).toHaveBeenCalledTimes(17);
       expect(Gatt.onMock).toHaveBeenCalledWith(expect.any(String), expect.any(Function));
@@ -1020,6 +1039,21 @@ describe('hci-socket bindings', () => {
       expect(connectCallback).toHaveBeenCalledWith('addresssplitbyseparator', null);
 
       should(bindings._pendingConnectionUuid).equal(null);
+    });
+
+    it('threads the hci userChannel flag into Signaling', () => {
+      const status = 0;
+      const handle = 'handle';
+      const role = 0;
+      const addressType = 'addressType';
+      const address = 'address:split:by:separator';
+
+      bindings._hci.isUserChannel.mockReturnValue(true);
+      bindings.onLeConnComplete(status, handle, role, addressType, address);
+
+      jest.advanceTimersByTime(0);
+
+      expect(Signaling).toHaveBeenCalledWith(handle, expect.anything(), true);
     });
 
     it('with invalid status on master node', () => {

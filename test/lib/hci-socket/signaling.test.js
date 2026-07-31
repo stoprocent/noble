@@ -87,5 +87,40 @@ describe('hci-socket signaling', () => {
       expect(callback).toHaveBeenCalledWith(handle, 1.25, 2.5, 3, 40);
       expect(aclStream.write).toHaveBeenCalledWith(5, Buffer.from([0x13, 0x01, 0x02, 0x00, 0x00, 0x00]));
     });
+
+    test('should write on linux when userChannel option is true', () => {
+      os.platform.mockReturnValue('linux');
+      const userChannelSignaling = new Signaling(handle, aclStream, true);
+      const callback = jest.fn();
+
+      userChannelSignaling.on('connectionParameterUpdateRequest', callback);
+      userChannelSignaling.processConnectionParameterUpdateRequest(1, Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]));
+
+      expect(callback).toHaveBeenCalledWith(handle, 1.25, 2.5, 3, 40);
+      expect(aclStream.write).toHaveBeenCalledWith(5, Buffer.from([0x13, 0x01, 0x02, 0x00, 0x00, 0x00]));
+    });
+
+    test('should not write on linux when userChannel option is false, even if HCI_CHANNEL_USER is set', () => {
+      const originalEnv = process.env.HCI_CHANNEL_USER;
+      process.env.HCI_CHANNEL_USER = '1';
+
+      try {
+        os.platform.mockReturnValue('linux');
+        const nonUserChannelSignaling = new Signaling(handle, aclStream, false);
+        const callback = jest.fn();
+
+        nonUserChannelSignaling.on('connectionParameterUpdateRequest', callback);
+        nonUserChannelSignaling.processConnectionParameterUpdateRequest(1, Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]));
+
+        expect(callback).not.toHaveBeenCalled();
+        expect(aclStream.write).not.toHaveBeenCalled();
+      } finally {
+        if (typeof originalEnv === 'undefined') {
+          delete process.env.HCI_CHANNEL_USER;
+        } else {
+          process.env.HCI_CHANNEL_USER = originalEnv;
+        }
+      }
+    });
   });
 });

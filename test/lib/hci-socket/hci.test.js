@@ -136,6 +136,7 @@ describe('hci-socket hci', () => {
 
     it('should bindRaw', () => {
       hci.pollIsDevUp = sinon.spy();
+      hci.readLeSupportedFeatures = sinon.spy();
 
       hci._userChannel = undefined;
       hci._bound = false;
@@ -150,8 +151,10 @@ describe('hci-socket hci', () => {
       assert.calledOnceWithExactly(hci._socket.start);
 
       assert.calledOnceWithExactly(hci.pollIsDevUp);
+      assert.notCalled(hci.readLeSupportedFeatures);
 
       should(hci._bound).be.true();
+      should(hci._isStarted).be.true();
     });
 
     it('should not bindRaw', () => {
@@ -172,6 +175,27 @@ describe('hci-socket hci', () => {
       assert.calledOnceWithExactly(hci.pollIsDevUp);
 
       should(hci._bound).be.true();
+    });
+
+    it('should defer LE Read Local Supported Features until reset completes, and skip pollIsDevUp, for user channel', () => {
+      hci.pollIsDevUp = sinon.spy();
+      hci.readLeSupportedFeatures = sinon.spy();
+      hci.setSocketFilter = sinon.spy();
+
+      hci._userChannel = true;
+      hci.init();
+
+      assert.calledOnceWithExactly(hci._socket.bindUser, deviceId, undefined);
+      assert.calledOnceWithExactly(hci._socket.start);
+
+      assert.notCalled(hci.readLeSupportedFeatures);
+      assert.notCalled(hci.pollIsDevUp);
+      assert.notCalled(hci.setSocketFilter);
+      should(hci._isStarted).be.true();
+
+      hci.emit('reset');
+
+      assert.calledOnceWithExactly(hci.readLeSupportedFeatures);
     });
   });
 
@@ -363,6 +387,17 @@ describe('hci-socket hci', () => {
       hci.pollIsDevUp();
 
       should(sinon.clock.countTimers()).equal(1);
+    });
+
+    it('should not reschedule itself for user channel', () => {
+      hci._userChannel = true;
+      hci._isStarted = true;
+      hci._socket.isDevUp.returns(true);
+      hci._isDevUp = true;
+
+      hci.pollIsDevUp();
+
+      should(sinon.clock.countTimers()).equal(0);
     });
   });
 
@@ -738,6 +773,98 @@ describe('hci-socket hci', () => {
     should(hci._aclConnections.size).equal(0);
   });
 
+  it('should resolve getAclBuffers after LE_READ_BUFFER_SIZE_CMD command complete', async () => {
+    const aclBuffersPromise = hci.getAclBuffers();
+
+    hci.processCmdCompleteEvent(8194, 0, Buffer.from([0x10, 0x00, 5]));
+
+    should(await aclBuffersPromise).deepEqual({ length: 0x10, num: 5 });
+  });
+
+  it('should resolve getAclBuffers when LE Read Buffer Size reports zero and BR/EDR succeeds', async () => {
+    const LE_READ_BUFFER_SIZE_CMD = 8194;
+    const READ_BUFFER_SIZE_CMD = 4101;
+    const aclBuffersPromise = hci.getAclBuffers();
+
+    hci.processCmdCompleteEvent(LE_READ_BUFFER_SIZE_CMD, 0, Buffer.from([0, 0, 0]));
+    hci.processCmdCompleteEvent(READ_BUFFER_SIZE_CMD, 0, Buffer.from([0x40, 0x00, 3, 0x0a, 0x00]));
+
+    should(await aclBuffersPromise).deepEqual({ length: 0x40, num: 10 });
+  });
+
+  it('should resolve getAclBuffers with the LE minimum and still write ACL data when both buffer-size commands fail', async () => {
+    const LE_READ_BUFFER_SIZE_CMD = 8194;
+    const READ_BUFFER_SIZE_CMD = 4101;
+    const aclBuffersPromise = hci.getAclBuffers();
+
+    hci.processCmdCompleteEvent(LE_READ_BUFFER_SIZE_CMD, 0x0c, Buffer.from([]));
+    hci.processCmdCompleteEvent(READ_BUFFER_SIZE_CMD, 0x0c, Buffer.from([]));
+
+    const timedOut = Symbol('timedOut');
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), 300);
+    });
+    const aclBuffers = await Promise.race([aclBuffersPromise, timeout]);
+    clearTimeout(timer);
+
+    should(aclBuffers).deepEqual({ length: 27, num: 1 });
+
+    const handle = 0x1234;
+    hci._aclConnections.set(4660, { pending: 0 });
+
+    const writePromise = hci.writeAclDataPkt(handle, 345, Buffer.from([1, 2, 3]));
+    let writeTimer;
+    const writeTimeout = new Promise((resolve) => {
+      writeTimer = setTimeout(() => resolve(timedOut), 300);
+    });
+    const outcome = await Promise.race([writePromise.then(() => 'resolved'), writeTimeout]);
+    clearTimeout(writeTimer);
+
+    should(outcome).equal('resolved');
+    should(hci._socket.write.args.some(([buf]) => buf[0] === 0x02 /* HCI_ACLDATA_PKT */)).be.true();
+  });
+
+  it('should write ACL data after init drives the LE buffer size chain in user channel mode (issue #109)', async () => {
+    const buildCmdCompleteEvent = (cmd, status, result) => {
+      const header = Buffer.from([0x04 /* HCI_EVENT_PKT */, 0x0e /* EVT_CMD_COMPLETE */, 3 + result.length, 1]);
+      const cmdBuf = Buffer.alloc(2);
+      cmdBuf.writeUInt16LE(cmd, 0);
+      return Buffer.concat([header, cmdBuf, Buffer.from([status]), result]);
+    };
+    const wroteCmd = (cmd) => hci._socket.write.args.some(([buf]) => buf.readUInt16LE(1) === cmd);
+    const RESET_CMD = 3075;
+    const LE_READ_LOCAL_SUPPORTED_FEATURES = 8195;
+    const LE_READ_BUFFER_SIZE_CMD = 8194;
+
+    hci._userChannel = true;
+    hci.init();
+
+    should(wroteCmd(LE_READ_LOCAL_SUPPORTED_FEATURES)).be.false();
+    hci.onSocketData(buildCmdCompleteEvent(RESET_CMD, 0, Buffer.alloc(0)));
+
+    should(wroteCmd(LE_READ_LOCAL_SUPPORTED_FEATURES)).be.true();
+    hci.onSocketData(buildCmdCompleteEvent(LE_READ_LOCAL_SUPPORTED_FEATURES, 0, Buffer.alloc(8)));
+
+    should(wroteCmd(LE_READ_BUFFER_SIZE_CMD)).be.true();
+    hci.onSocketData(buildCmdCompleteEvent(LE_READ_BUFFER_SIZE_CMD, 0, Buffer.from([0x10, 0x00, 5])));
+
+    const handle = 0x1234;
+    hci._aclConnections.set(handle, { pending: 0 });
+
+    const writePromise = hci.writeAclDataPkt(handle, 345, Buffer.from([5, 6, 7]));
+    const timedOut = Symbol('timedOut');
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), 300);
+    });
+    const outcome = await Promise.race([writePromise.then(() => 'resolved'), timeout]);
+    clearTimeout(timer);
+
+    should(outcome).equal('resolved');
+    should(hci._socket.write.args.some(([buf]) => buf[0] === 0x02 /* HCI_ACLDATA_PKT */)).be.true();
+  });
+
   describe('flushAcl', () => {
     it('should not write flush on no pending connections', () => {
       const queue = [
@@ -821,6 +948,49 @@ describe('hci-socket hci', () => {
       assert.calledWithExactly(hci._socket.write, Buffer.from([0x02]));
 
       should(hci._aclQueue).be.empty();
+      should(hci._aclConnections.get(4660).pending).equal(5);
+      should(hci._aclConnections.get(4661).pending).equal(3);
+    });
+
+    it('should skip a queued packet whose connection is gone, without throwing, and keep flushing the rest', async () => {
+      const queue = [
+        { handle: 4660, packet: Buffer.from([0x02, 0xaa]) },
+        { handle: 4661, packet: Buffer.from([0x02, 0xbb]) }
+      ];
+      hci._aclQueue = [...queue];
+      hci._aclConnections.set(4661, { pending: 0 });
+      hci._aclBuffers = { num: 12 };
+
+      await hci.flushAcl();
+
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x02, 0xbb]));
+      should(hci._aclQueue).be.empty();
+      should(hci._aclConnections.get(4661).pending).equal(1);
+    });
+
+    it('should not throw when a disconnect completes for the handle while writeAclDataPkt is awaiting acl buffers', async () => {
+      const handle = 0x1234;
+      hci._aclConnections.set(4660, { pending: 0 });
+
+      const flushAclPromises = [];
+      const originalFlushAcl = hci.flushAcl.bind(hci);
+      hci.flushAcl = (...args) => {
+        const promise = originalFlushAcl(...args);
+        flushAclPromises.push(promise);
+        return promise;
+      };
+
+      const writePromise = hci.writeAclDataPkt(handle, 345, Buffer.from([1, 2, 3]));
+
+      // EVT_DISCONN_COMPLETE for the same handle, landing before writeAclDataPkt resumes from its acl-buffers await
+      hci.onSocketData(Buffer.from([0x04, 0x05, 0, 0, 0x34, 0x12, 0x13]));
+
+      hci.setAclBuffers(20, 5);
+
+      await writePromise;
+      await Promise.all(flushAclPromises);
+
+      should(hci._aclConnections.has(4660)).be.false();
     });
 
     it('should skip a queued packet whose connection is gone, without throwing, and keep draining the rest', async () => {
@@ -1341,26 +1511,41 @@ describe('hci-socket hci', () => {
       jest.clearAllMocks();
     });
     
-    test('should not process on error status', () => {
+    test('should still complete the init chain on error status, but skip leFeatures and isExtended', () => {
       const cmd = 8195;
       const status = 1;
       const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
-  
+      const leFeaturesCallback = jest.fn();
+      hci.on('leFeatures', leFeaturesCallback);
+
       hci.processCmdCompleteEvent(cmd, status, result);
-  
-      // Verify no methods were called
+
       expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
-      expect(hci.setEventMask).not.toHaveBeenCalled();
-      expect(hci.setLeEventMask).not.toHaveBeenCalled();
-      expect(hci.readLocalVersion).not.toHaveBeenCalled();
-      expect(hci.writeLeHostSupported).not.toHaveBeenCalled();
-      expect(hci.readLeHostSupported).not.toHaveBeenCalled();
-      expect(hci.readLeBufferSize).not.toHaveBeenCalled();
-      expect(hci.readBdAddr).not.toHaveBeenCalled();
-  
+      expect(leFeaturesCallback).not.toHaveBeenCalled();
       expect(hci._isExtended).toBe(false);
+
+      // The rest of the chain must still run, or ACL writes hang forever (issue #109).
+      expect(hci.setEventMask).toHaveBeenCalled();
+      expect(hci.setLeEventMask).toHaveBeenCalled();
+      expect(hci.readLocalVersion).toHaveBeenCalled();
+      expect(hci.writeLeHostSupported).toHaveBeenCalled();
+      expect(hci.readLeHostSupported).toHaveBeenCalled();
+      expect(hci.readLeBufferSize).toHaveBeenCalled();
+      expect(hci.readBdAddr).toHaveBeenCalled();
     });
-  
+
+    test('should resolve getAclBuffers after a failed status once LE Read Buffer Size completes', async () => {
+      const aclBuffersPromise = hci.getAclBuffers();
+
+      hci.processCmdCompleteEvent(8195, 0x0c, Buffer.from([0x00, 0x00, 0x00, 0x00]));
+
+      expect(hci.readLeBufferSize).toHaveBeenCalled();
+
+      hci.processCmdCompleteEvent(8194, 0, Buffer.from([0x10, 0x00, 5]));
+
+      should(await aclBuffersPromise).deepEqual({ length: 0x10, num: 5 });
+    });
+
     test('should process without extended features', () => {
       const cmd = 8195;
       const status = 0;
@@ -1436,7 +1621,7 @@ describe('hci-socket hci', () => {
       hci.readBufferSize = sinon.spy();
       hci.setCodedPhySupport = sinon.spy();
 
-      hci._aclBuffers = aclBuffers;
+      hci._aclBuffers = { ...aclBuffers };
 
       rssiReadCallback = sinon.spy();
       leScanEnableSetCallback = sinon.spy();
@@ -1939,36 +2124,6 @@ describe('hci-socket hci', () => {
       should(hci._isExtended).equal(false);
     });
 
-    it('should do nothing - LE_READ_BUFFER_SIZE_CMD', () => {
-      const cmd = 8194;
-      const status = 0;
-      const result = Buffer.from([1, 0, 2]);
-
-      hci.processCmdCompleteEvent(cmd, status, result);
-
-      // called
-
-      // not called
-      assert.notCalled(hci.readBufferSize);
-      assert.notCalled(rssiReadCallback);
-      assert.notCalled(addressChangeCallback);
-      assert.notCalled(hci.setEventMask);
-      assert.notCalled(hci.setLeEventMask);
-      assert.notCalled(hci.readLocalVersion);
-      assert.notCalled(hci.readBdAddr);
-      assert.notCalled(hci.setScanEnabled);
-      assert.notCalled(hci.setScanParameters);
-      assert.notCalled(hci.setCodedPhySupport);
-      assert.notCalled(leScanEnableSetCallback);
-      assert.notCalled(stateChangeCallback);
-      assert.notCalled(leScanParametersSetCallback);
-      assert.notCalled(readLocalVersionCallback);
-
-      // hci checks
-      should(hci._aclBuffers).deepEqual(aclBuffers);
-      should(hci._isExtended).equal(false);
-    });
-
     it('should do nothing - READ_BUFFER_SIZE_CMD', () => {
       const cmd = 4101;
       const status = 0;
@@ -2000,6 +2155,47 @@ describe('hci-socket hci', () => {
         num: 2
       });
       should(hci._isExtended).equal(false);
+    });
+
+    it('should not throw and delegate to READ_BUFFER_SIZE - LE_READ_BUFFER_SIZE_CMD with error status', () => {
+      const cmd = 8194;
+      const status = 0x0c;
+      const result = Buffer.from([]);
+
+      should(() => hci.processCmdCompleteEvent(cmd, status, result)).not.throw();
+
+      assert.calledOnceWithExactly(hci.readBufferSize);
+      should(hci._aclBuffers).deepEqual(aclBuffers);
+    });
+
+    it('should not throw and fall back to the LE minimum - READ_BUFFER_SIZE_CMD with error status', () => {
+      const cmd = 4101;
+      const status = 0x0c;
+      const result = Buffer.from([]);
+
+      should(() => hci.processCmdCompleteEvent(cmd, status, result)).not.throw();
+
+      should(hci._aclBuffers).deepEqual({ length: 27, num: 1 });
+    });
+
+    it('should fall back to the LE minimum - READ_BUFFER_SIZE_CMD with zero acl length', () => {
+      const cmd = 4101;
+      const status = 0;
+      const result = Buffer.from([0, 0, 3, 2, 0]);
+
+      hci.processCmdCompleteEvent(cmd, status, result);
+
+      should(hci._aclBuffers).deepEqual({ length: 27, num: 1 });
+    });
+
+    it('should fall back to the LE minimum - READ_BUFFER_SIZE_CMD with zero acl num', () => {
+      const cmd = 4101;
+      const status = 0;
+      const result = Buffer.from([1, 0, 0, 0, 0]);
+
+      hci.processCmdCompleteEvent(cmd, status, result);
+
+      should(hci._aclBuffers).deepEqual({ length: 27, num: 1 });
     });
 
     it('should do nothing - ??', () => {
