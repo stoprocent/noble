@@ -77,6 +77,45 @@ describe('hci-socket hci', () => {
     });
   });
 
+  describe('extended mode configuration', () => {
+    it('keeps an explicit true value when capability replies disagree', () => {
+      const configuredHci = new Hci({ extended: true });
+      const noLeExtendedAdvertising = Buffer.alloc(8);
+      const noExtendedScanCommands = Buffer.alloc(64);
+
+      configuredHci.processCmdCompleteEvent(8195, 0, noLeExtendedAdvertising);
+      configuredHci.processCmdCompleteEvent(4098, 0, noExtendedScanCommands);
+
+      should(configuredHci._isExtended).be.true();
+    });
+
+    it('keeps an explicit false value when capabilities advertise extended support', () => {
+      const configuredHci = new Hci({ extended: false });
+      const leExtendedAdvertising = Buffer.alloc(8);
+      const extendedScanCommands = Buffer.alloc(64);
+      leExtendedAdvertising[1] = 0x10;
+      extendedScanCommands[37] = 0x30;
+
+      configuredHci.processCmdCompleteEvent(8195, 0, leExtendedAdvertising);
+      configuredHci.processCmdCompleteEvent(4098, 0, extendedScanCommands);
+
+      should(configuredHci._isExtended).be.false();
+    });
+
+    it('auto-detects from LE features only and always stores a boolean', () => {
+      const detectedHci = new Hci({});
+      const leExtendedAdvertising = Buffer.alloc(8);
+      const noExtendedScanCommands = Buffer.alloc(64);
+      leExtendedAdvertising[1] = 0x10;
+
+      detectedHci.processCmdCompleteEvent(8195, 0, leExtendedAdvertising);
+      detectedHci.processCmdCompleteEvent(4098, 0, noExtendedScanCommands);
+
+      should(detectedHci._isExtended).be.a.Boolean();
+      should(detectedHci._isExtended).be.true();
+    });
+  });
+
   describe('init', () => {
     it('should reset', () => {
       hci.reset = sinon.spy();
@@ -1655,7 +1694,7 @@ describe('hci-socket hci', () => {
       should(hci._isExtended).equal(false);
     });
 
-    it('should change extended - READ_SUPPORTED_COMMANDS_CMD', () => {
+    it('should report extended commands without changing mode - READ_SUPPORTED_COMMANDS_CMD', () => {
       const cmd = 4098;
       const status = 0;
       const result = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 28, 30, 31, 32, 33, 34, 35, 35, 36, 0xff]);
@@ -1683,7 +1722,7 @@ describe('hci-socket hci', () => {
 
       // hci checks
       should(hci._aclBuffers).deepEqual(aclBuffers);
-      should(hci._isExtended).equal(32);
+      should(hci._isExtended).equal(false);
     });
 
     it('should emit addressChange - READ_BD_ADDR_CMD', () => {
