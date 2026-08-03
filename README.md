@@ -746,6 +746,7 @@ The following environment variables can configure noble's behavior:
 |----------|---------|---------|---------|
 | NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
 | HCI_CHANNEL_USER | Use the exclusive Linux HCI user channel | false | `export HCI_CHANNEL_USER=1` |
+| NOBLE_CODED_PHY | Offer LE Coded PHY for connections (long range, lower throughput; requires controller support) | false | `export NOBLE_CODED_PHY=1` |
 | NOBLE_REPORT_ALL_HCI_EVENTS | Report HCI events without waiting for scan response | false | `export NOBLE_REPORT_ALL_HCI_EVENTS=1` |
 | BLUETOOTH_HCI_SOCKET_UART_PORT | UART port for HCI communication | none | `export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/ttyUSB0` |
 | BLUETOOTH_HCI_SOCKET_UART_BAUDRATE | UART baudrate | 1000000 | `export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000` |

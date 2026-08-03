@@ -274,6 +274,14 @@ declare module '@stoprocent/noble' {
          * channel. The selected adapter must be down before binding.
          */
         userChannel?: boolean;
+        /**
+         * Offer LE Coded PHY as an acceptable PHY for connections, for
+         * long-range links. Off by default: Coded PHY trades throughput for
+         * range, and a peer may negotiate onto it. Ignored on controllers
+         * that do not report the LE Coded PHY feature. Does not affect
+         * scanning.
+         */
+        codedPhy?: boolean;
     }
 
     export interface MacBindingsOptions extends BaseBindingsOptions {}
