@@ -611,13 +611,224 @@ describe('hci-socket hci', () => {
   describe('setLeEventMask', () => {
     it('should setLeEventMask', () => {
       hci.setLeEventMask();
-      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 1, 0x20, 8, 0x1f, 0, 0, 0, 0, 0, 0, 0]));
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 1, 0x20, 8, 0x5f, 0, 0, 0, 0, 0, 0, 0]));
     });
 
     it('should setLeEventMask for BLE5 (extended)', () => {
       hci._isExtended = true;
       hci.setLeEventMask();
-      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 1, 0x20, 8, 0x1f, 0xff, 0, 0, 0, 0, 0, 0]));
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 1, 0x20, 8, 0x5f, 0xff, 0, 0, 0, 0, 0, 0]));
+    });
+
+    it('should enable the data length change subevent in both modes', () => {
+      hci.setLeEventMask();
+      should(hci._socket.write.firstCall.args[0].readUInt8(4) & 0x40).equal(0x40);
+
+      hci._socket.write.resetHistory();
+      hci._isExtended = true;
+      hci.setLeEventMask();
+      should(hci._socket.write.firstCall.args[0].readUInt8(4) & 0x40).equal(0x40);
+    });
+  });
+
+  describe('data length extension', () => {
+    const LE_READ_LOCAL_SUPPORTED_FEATURES = 0x2003;
+    const LE_READ_MAX_DATA_LENGTH_CMD = 0x202f;
+    const LE_SET_DATA_LENGTH_OPCODE = 0x2022;
+
+    const writesOf = (opcode) => hci._socket.write.getCalls()
+      .map((call) => call.args[0])
+      .filter((buffer) => buffer.length >= 3 && buffer.readUInt16LE(1) === opcode);
+
+    // The address byte keeps the buffer from being all zero, which both handlers discard.
+    const connCompleteData = (handle = 0x0040) => {
+      const data = Buffer.alloc(17);
+      data.writeUInt16LE(handle, 0);
+      data.writeUInt8(0x01, 9);
+      return data;
+    };
+
+    const enhancedConnCompleteData = (handle = 0x0040) => {
+      const data = Buffer.alloc(29);
+      data.writeUInt16LE(handle, 0);
+      data.writeUInt8(0x01, 9);
+      return data;
+    };
+
+    const maxDataLengthResult = (txOctets, txTime, rxOctets = 251, rxTime = 17040) => {
+      const result = Buffer.alloc(8);
+      result.writeUInt16LE(txOctets, 0);
+      result.writeUInt16LE(txTime, 2);
+      result.writeUInt16LE(rxOctets, 4);
+      result.writeUInt16LE(rxTime, 6);
+      return result;
+    };
+
+    const withNegotiatedMax = (txOctets = 251, txTime = 2120) => {
+      hci._supportsDataLengthExtension = true;
+      hci._maxDataLength = { txOctets, txTime };
+    };
+
+    it('treats the controller as unsupported until features are read', () => {
+      should(hci._supportsDataLengthExtension).be.false();
+      should(hci._maxDataLength).be.null();
+    });
+
+    it('reads the controller maximum when the feature bit is set', () => {
+      // result[0] bit 5 is the LE Data Packet Length Extension feature bit
+      hci.processCmdCompleteEvent(LE_READ_LOCAL_SUPPORTED_FEATURES, 0, Buffer.from([0x20, 0x00, 0x00, 0x00]));
+
+      should(hci._supportsDataLengthExtension).be.true();
+      should(writesOf(LE_READ_MAX_DATA_LENGTH_CMD)).have.length(1);
+    });
+
+    it('leaves an unsupported controller alone', () => {
+      hci.processCmdCompleteEvent(LE_READ_LOCAL_SUPPORTED_FEATURES, 0, Buffer.from([0x00, 0x00, 0x00, 0x00]));
+
+      should(hci._supportsDataLengthExtension).be.false();
+      should(writesOf(LE_READ_MAX_DATA_LENGTH_CMD)).be.empty();
+    });
+
+    it('does not read the maximum when the feature read fails', () => {
+      hci.processCmdCompleteEvent(LE_READ_LOCAL_SUPPORTED_FEATURES, 0x0c, Buffer.from([0x20, 0x00, 0x00, 0x00]));
+
+      should(hci._supportsDataLengthExtension).be.false();
+      should(writesOf(LE_READ_MAX_DATA_LENGTH_CMD)).be.empty();
+    });
+
+    it('forgets a stored maximum when a later feature read reports no support', () => {
+      withNegotiatedMax();
+
+      hci.processCmdCompleteEvent(LE_READ_LOCAL_SUPPORTED_FEATURES, 0, Buffer.from([0x00, 0x00, 0x00, 0x00]));
+
+      should(hci._maxDataLength).be.null();
+    });
+
+    it('stores the reported maximum tx octets and time', () => {
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0, maxDataLengthResult(251, 2120));
+
+      should(hci._maxDataLength).deepEqual({ txOctets: 251, txTime: 2120 });
+    });
+
+    it('clamps a reported maximum above the spec range', () => {
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0, maxDataLengthResult(0xffff, 0xffff));
+
+      should(hci._maxDataLength).deepEqual({ txOctets: 251, txTime: 17040 });
+    });
+
+    it('rejects a reported maximum below the spec range', () => {
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0, maxDataLengthResult(26, 2120));
+      should(hci._maxDataLength).be.null();
+
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0, maxDataLengthResult(251, 327));
+      should(hci._maxDataLength).be.null();
+    });
+
+    it('ignores a failed maximum read', () => {
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0x0c, maxDataLengthResult(251, 2120));
+
+      should(hci._maxDataLength).be.null();
+    });
+
+    it('ignores a short maximum read result', () => {
+      hci.processCmdCompleteEvent(LE_READ_MAX_DATA_LENGTH_CMD, 0, Buffer.from([0xfb, 0x00, 0x48, 0x08]));
+
+      should(hci._maxDataLength).be.null();
+    });
+
+    it('requests the data length once per connection', () => {
+      withNegotiatedMax(251, 2120);
+
+      hci.processLeConnComplete(0, connCompleteData(0x0040));
+
+      const writes = writesOf(LE_SET_DATA_LENGTH_OPCODE);
+      should(writes).have.length(1);
+      should(writes[0]).deepEqual(Buffer.from([1, 0x22, 0x20, 6, 0x40, 0x00, 0xfb, 0x00, 0x48, 0x08]));
+    });
+
+    it('requests the data length for an enhanced connection', () => {
+      withNegotiatedMax(251, 2120);
+
+      hci.processLeEnhancedConnComplete(0, enhancedConnCompleteData(0x0041));
+
+      const writes = writesOf(LE_SET_DATA_LENGTH_OPCODE);
+      should(writes).have.length(1);
+      should(writes[0].readUInt16LE(4)).equal(0x0041);
+    });
+
+    it('requests the data length again on reconnect', () => {
+      withNegotiatedMax();
+
+      hci.processLeConnComplete(0, connCompleteData(0x0040));
+      hci.processLeConnComplete(0, connCompleteData(0x0041));
+
+      should(writesOf(LE_SET_DATA_LENGTH_OPCODE)).have.length(2);
+    });
+
+    it('does not request the data length on an unsupported controller', () => {
+      hci._maxDataLength = { txOctets: 251, txTime: 2120 };
+
+      hci.processLeConnComplete(0, connCompleteData());
+
+      should(writesOf(LE_SET_DATA_LENGTH_OPCODE)).be.empty();
+    });
+
+    it('does not request the data length before the maximum is known', () => {
+      hci._supportsDataLengthExtension = true;
+
+      hci.processLeConnComplete(0, connCompleteData());
+
+      should(writesOf(LE_SET_DATA_LENGTH_OPCODE)).be.empty();
+    });
+
+    it('does not request the data length for a failed connection', () => {
+      withNegotiatedMax();
+
+      hci.processLeConnComplete(0x3e, connCompleteData());
+
+      should(writesOf(LE_SET_DATA_LENGTH_OPCODE)).be.empty();
+    });
+
+    it('still completes the connection when the request cannot be written', () => {
+      withNegotiatedMax();
+      hci._socket.write.throws(new Error('ENOBUFS'));
+      const callback = sinon.spy();
+      hci.on('leConnComplete', callback);
+
+      hci.processLeConnComplete(0, connCompleteData(0x0040));
+
+      assert.calledOnce(callback);
+      should(hci._aclConnections.has(0x0040)).be.true();
+    });
+
+    // Characterization: a rejected request is logged and otherwise ignored, so the stored
+    // controller maximum stays usable for the next connection and no retry is attempted.
+    it('keeps the stored maximum when the controller rejects the request', () => {
+      withNegotiatedMax(251, 2120);
+
+      hci.processCmdCompleteEvent(LE_SET_DATA_LENGTH_OPCODE, 0x11, Buffer.from([0x40, 0x00]));
+
+      should(hci._maxDataLength).deepEqual({ txOctets: 251, txTime: 2120 });
+      should(writesOf(LE_SET_DATA_LENGTH_OPCODE)).be.empty();
+    });
+
+    it('emits the negotiated length from the data length change event', () => {
+      const callback = sinon.spy();
+      hci.on('leDataLengthChange', callback);
+
+      // subevent parameters: handle 0x0140, max tx octets/time, max rx octets/time
+      hci.processLeMetaEvent(0x07, 0x40, Buffer.from([0x01, 0xfb, 0x00, 0x48, 0x08, 0xfb, 0x00, 0x48, 0x08]));
+
+      assert.calledOnceWithExactly(callback, 0x0140, 251, 2120, 251, 2120);
+    });
+
+    it('ignores a short data length change event', () => {
+      const callback = sinon.spy();
+      hci.on('leDataLengthChange', callback);
+
+      hci.processLeMetaEvent(0x07, 0x40, Buffer.from([0x01, 0xfb, 0x00, 0x48]));
+
+      assert.notCalled(callback);
     });
   });
 
