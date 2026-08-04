@@ -77,6 +77,57 @@ describe('hci-socket hci', () => {
     });
   });
 
+  describe('coded phy configuration', () => {
+    let originalCodedPhy;
+
+    beforeEach(() => {
+      originalCodedPhy = process.env.NOBLE_CODED_PHY;
+    });
+
+    afterEach(() => {
+      if (originalCodedPhy === undefined) {
+        delete process.env.NOBLE_CODED_PHY;
+      } else {
+        process.env.NOBLE_CODED_PHY = originalCodedPhy;
+      }
+    });
+
+    it('is off by default', () => {
+      delete process.env.NOBLE_CODED_PHY;
+
+      should(new Hci({})._codedPhy).be.false();
+    });
+
+    it('treats controller support as unknown until features are read', () => {
+      should(new Hci({ codedPhy: true })._supportsCodedPhy).be.false();
+    });
+
+    it('uses the codedPhy option', () => {
+      delete process.env.NOBLE_CODED_PHY;
+
+      should(new Hci({ codedPhy: true })._codedPhy).be.true();
+    });
+
+    it('allows the option to disable an environment setting', () => {
+      process.env.NOBLE_CODED_PHY = '1';
+
+      should(new Hci({ codedPhy: false })._codedPhy).be.false();
+    });
+
+    it('uses NOBLE_CODED_PHY when the option is omitted', () => {
+      process.env.NOBLE_CODED_PHY = '1';
+
+      should(new Hci({})._codedPhy).be.true();
+    });
+
+    it('is independent of extended mode', () => {
+      delete process.env.NOBLE_CODED_PHY;
+
+      should(new Hci({ extended: true })._codedPhy).be.false();
+      should(new Hci({ codedPhy: true })._isExtended).be.false();
+    });
+  });
+
   describe('extended mode configuration', () => {
     it('keeps an explicit true value when capability replies disagree', () => {
       const configuredHci = new Hci({ extended: true });
@@ -1567,6 +1618,60 @@ describe('hci-socket hci', () => {
   
       expect(hci._isExtended).toBe(false);
     });
+
+    test('should detect extended features without offering coded phy', () => {
+      // result[1] bit 4 is the LE extended advertising feature bit
+      hci.processCmdCompleteEvent(8195, 0, Buffer.from([0x00, 0x10, 0x00, 0x00]));
+
+      expect(hci._isExtended).toBe(true);
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+    });
+
+    test('should not offer coded phy on a capable controller unless opted in', () => {
+      // result[1] bit 3 is the LE Coded PHY feature bit
+      hci.processCmdCompleteEvent(8195, 0, Buffer.from([0x00, 0x08, 0x00, 0x00]));
+
+      expect(hci._supportsCodedPhy).toBe(true);
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+    });
+
+    test('should offer coded phy exactly once when opted in and supported', () => {
+      hci._codedPhy = true;
+
+      hci.processCmdCompleteEvent(8195, 0, Buffer.from([0x00, 0x08, 0x00, 0x00]));
+
+      expect(hci._isExtended).toBe(false);
+      expect(hci._supportsCodedPhy).toBe(true);
+      expect(hci.setCodedPhySupport).toHaveBeenCalledTimes(1);
+    });
+
+    test('should not offer coded phy when opted in on an unsupported controller', () => {
+      hci._codedPhy = true;
+
+      hci.processCmdCompleteEvent(8195, 0, Buffer.from([0x00, 0x10, 0x00, 0x00]));
+
+      expect(hci._supportsCodedPhy).toBe(false);
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+    });
+
+    test('should offer coded phy once at discovery and once per later reset', () => {
+      hci._codedPhy = true;
+
+      hci.processCmdCompleteEvent(8195, 0, Buffer.from([0x00, 0x08, 0x00, 0x00]));
+      expect(hci.setCodedPhySupport).toHaveBeenCalledTimes(1);
+
+      hci.processCmdCompleteEvent(3075, 0, Buffer.from([]));
+      expect(hci.setCodedPhySupport).toHaveBeenCalledTimes(2);
+    });
+
+    test('should not offer coded phy when the feature read fails', () => {
+      hci._codedPhy = true;
+
+      hci.processCmdCompleteEvent(8195, 0x0c, Buffer.from([0x00, 0x08, 0x00, 0x00]));
+
+      expect(hci._supportsCodedPhy).toBe(false);
+      expect(hci.setCodedPhySupport).not.toHaveBeenCalled();
+    });
   });
 
   describe('onSocketError', () => {
@@ -1722,7 +1827,7 @@ describe('hci-socket hci', () => {
       should(hci._isExtended).equal(false);
     });
 
-    it('should reset (extended)', () => {
+    it('should reset (extended) without offering coded phy', () => {
       const cmd = 3075;
       const status = 0;
       const result = Buffer.from([]);
@@ -1735,7 +1840,7 @@ describe('hci-socket hci', () => {
       assert.calledOnceWithExactly(hci.setLeEventMask);
       assert.calledOnceWithExactly(hci.readLocalVersion);
       assert.calledOnceWithExactly(hci.readBdAddr);
-      assert.calledOnceWithExactly(hci.setCodedPhySupport);
+      assert.notCalled(hci.setCodedPhySupport);
 
       // not called
       assert.notCalled(hci.setScanEnabled);
@@ -1751,6 +1856,36 @@ describe('hci-socket hci', () => {
       // hci checks
       should(hci._aclBuffers).deepEqual(aclBuffers);
       should(hci._isExtended).equal(true);
+    });
+
+    it('should reset without offering coded phy before support is known', () => {
+      hci._codedPhy = true;
+
+      hci.processCmdCompleteEvent(3075, 0, Buffer.from([]));
+
+      assert.notCalled(hci.setCodedPhySupport);
+      assert.calledOnceWithExactly(hci.setEventMask);
+      assert.calledOnceWithExactly(hci.setLeEventMask);
+    });
+
+    it('should reapply coded phy on a later reset once support is known', () => {
+      hci._codedPhy = true;
+      hci._supportsCodedPhy = true;
+      hci._isExtended = false;
+
+      hci.processCmdCompleteEvent(3075, 0, Buffer.from([]));
+
+      assert.calledOnceWithExactly(hci.setCodedPhySupport);
+      assert.calledOnceWithExactly(hci.setEventMask);
+      assert.calledOnceWithExactly(hci.setLeEventMask);
+    });
+
+    it('should not reapply coded phy on a later reset when not opted in', () => {
+      hci._supportsCodedPhy = true;
+
+      hci.processCmdCompleteEvent(3075, 0, Buffer.from([]));
+
+      assert.notCalled(hci.setCodedPhySupport);
     });
 
     it('should only log debug - READ_LE_HOST_SUPPORTED_CMD', () => {
