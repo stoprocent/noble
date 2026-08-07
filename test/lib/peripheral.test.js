@@ -33,8 +33,7 @@ describe('peripheral', () => {
       updateRssi: jest.fn(),
       discoverServices: jest.fn(),
       readHandle: jest.fn(),
-      writeHandle: jest.fn(),
-      pair: jest.fn()
+      writeHandle: jest.fn()
     };
     
     peripheral = new Peripheral(

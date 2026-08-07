@@ -711,6 +711,19 @@ describe('noble', () => {
       );
     });
 
+
+    test('should reject DevicePairingKinds.None (empty mask)', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, DevicePairingKinds.None, cb);
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(expect.any(Error));
+      expect(cb.mock.calls[0][0].message).toBe(
+        'pair() requires at least one DevicePairingKinds value; DevicePairingKinds.None matches no ceremony'
+      );
+      expect(mockBindings.pair).not.toHaveBeenCalled();
+    });
+
     test('should surface deterministic error when binding has no pair method', () => {
       mockBindings.pair = jest.fn();
       delete mockBindings.pair;
