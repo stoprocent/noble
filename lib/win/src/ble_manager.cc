@@ -388,7 +388,7 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
     mEmit.MTU(uuid, mtu);
 }
 
-bool BLEManager::Pair(const std::string& uuid, DevicePairingKinds kinds)
+bool BLEManager::Pair(const std::string& uuid, winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds)
 {
     auto it = mDeviceMap.find(uuid);
     if (it == mDeviceMap.end() || !it->second.device.has_value())
