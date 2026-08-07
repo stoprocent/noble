@@ -44,6 +44,17 @@ declare module '@stoprocent/noble' {
         ConfirmPassword = 0x00000100,
     }
 
+    /**
+     * Mirrors WinRT's `DevicePairingProtectionLevel`.
+     * Used only by the Windows binding.
+     */
+    export enum DevicePairingProtectionLevel {
+        Default = 0,
+        None = 1,
+        Encryption = 2,
+        EncryptionAndAuthentication = 3,
+    }
+
     export interface ConnectOptions {
         addressType?: PeripheralAddressType;
         minInterval?: number;
@@ -64,7 +75,7 @@ declare module '@stoprocent/noble' {
         stopScanningAsync(): Promise<void>;
         discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
         connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
-        pairAsync(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds): Promise<void>;
+        pairAsync(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, protectionLevel?: DevicePairingProtectionLevel): Promise<void>;
 
         startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
         stopScanning(callback?: () => void): void;
@@ -76,13 +87,14 @@ declare module '@stoprocent/noble' {
 
         /**
          * Pair with a peripheral. `kind` defaults to
-         * `DevicePairingKinds.ConfirmOnly` (Just Works, no UI). On Windows,
-         * any other kind (e.g. `DisplayPin`) causes Windows to surface its
-         * native pairing dialog — this library does not forward a PIN or
-         * password back to JS. On non-Windows platforms the call surfaces
-         * a "Pairing is not supported" error.
+         * `DevicePairingKinds.ConfirmOnly` and `protectionLevel` defaults to
+         * `DevicePairingProtectionLevel.Encryption`. On Windows, non-ConfirmOnly
+         * kinds (e.g. `DisplayPin`) use the OS pairing dialog. On non-Windows
+         * platforms the call surfaces a "Pairing is not supported" error.
          */
+        pair(idOrAddress: PeripheralIdOrAddress, callback: (error: Error | undefined) => void): void;
         pair(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
+        pair(idOrAddress: PeripheralIdOrAddress, kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;
     
         on(event: "stateChange", listener: (state: AdapterState) => void): this;
         on(event: "scanStart", listener: () => void): this;
@@ -137,7 +149,7 @@ declare module '@stoprocent/noble' {
         readonly uuid: string;
     
         connectAsync(): Promise<void>;
-        pairAsync(kind?: DevicePairingKinds): Promise<void>;
+        pairAsync(kind?: DevicePairingKinds, protectionLevel?: DevicePairingProtectionLevel): Promise<void>;
         disconnectAsync(): Promise<void>;
         updateRssiAsync(): Promise<number>;
         discoverServicesAsync(): Promise<Service[]>;
@@ -148,7 +160,9 @@ declare module '@stoprocent/noble' {
         writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
 
         connect(callback?: (error: Error | undefined) => void): void;
+        pair(callback: (error: Error | undefined) => void): void;
         pair(kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
+        pair(kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;
         disconnect(callback?: () => void): void;
         updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
         discoverServices(): void;

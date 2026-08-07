@@ -388,7 +388,9 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
     mEmit.MTU(uuid, mtu);
 }
 
-bool BLEManager::Pair(const std::string& uuid, winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds)
+bool BLEManager::Pair(const std::string& uuid,
+                      winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds,
+                      winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel)
 {
     auto it = mDeviceMap.find(uuid);
     if (it == mDeviceMap.end() || !it->second.device.has_value())
@@ -441,18 +443,30 @@ bool BLEManager::Pair(const std::string& uuid, winrt::Windows::Devices::Enumerat
         // surfaces its native pairing dialog after we Accept() below.
         //
         // The PairingRequested lambda must Accept() exactly once for any kind
-        // the caller advertised in `kinds`. For kinds outside the mask we
-        // return without Accept(), which Windows treats as a rejection and the
-        // PairAsync completes with RejectedByHandler / AuthenticationNotAllowed.
-        // We never forward a PIN or password back to JS — Windows drives the UI
-        // for non-ConfirmOnly ceremonies.
+        // the caller advertised in `kinds`. Some devices negotiated through
+        // ConfirmPinMatch can still raise a ConfirmOnly prompt; treat that as a
+        // compatible fallback so pairing does not fail with status=Failed.
+        // For other kinds outside the mask we return without Accept(), which
+        // Windows treats as a rejection and PairAsync completes with
+        // RejectedByHandler / AuthenticationNotAllowed. We never forward a PIN
+        // or password back to JS — Windows drives the UI for non-ConfirmOnly
+        // ceremonies.
         custom = pairing.Custom();
         token = custom.PairingRequested(
             [kinds](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
                 winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
                 auto kind = args.PairingKind();
+                auto kindMask = static_cast<uint32_t>(kind);
+                auto requestedKinds = static_cast<uint32_t>(kinds);
+                bool confirmPinMatchRequested =
+                    (requestedKinds &
+                     static_cast<uint32_t>(
+                         winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmPinMatch)) != 0;
+                bool confirmOnlyFallback =
+                    confirmPinMatchRequested &&
+                    kind == winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmOnly;
                 LOGE("pairing requested, kind=%d", static_cast<int>(kind));
-                if ((static_cast<uint32_t>(kind) & static_cast<uint32_t>(kinds)) != 0)
+                if ((kindMask & requestedKinds) != 0 || confirmOnlyFallback)
                 {
                     args.Accept();
                 }
@@ -461,7 +475,7 @@ bool BLEManager::Pair(const std::string& uuid, winrt::Windows::Devices::Enumerat
             });
         handlerRegistered = true;
         auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
-        custom.PairAsync(kinds, DevicePairingProtectionLevel::Encryption)
+        custom.PairAsync(kinds, protectionLevel)
             .Completed(completed);
     }
     catch (const winrt::hresult_error& e)

@@ -101,7 +101,7 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
-// pair(deviceUuid, kinds?)
+// pair(deviceUuid, kinds?, protectionLevel?)
 Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
 {
     CHECK_MANAGER()
@@ -117,9 +117,12 @@ Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
     // with RejectedByHandler), instead of silently falling through to a
     // ceremony the caller never asked for.
     using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
+    using winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel;
     auto kinds = static_cast<DevicePairingKinds>(
         getUint32(info[1], static_cast<uint32_t>(DevicePairingKinds::None)));
-    manager->Pair(uuid, kinds);
+    auto protectionLevel = static_cast<DevicePairingProtectionLevel>(
+        getUint32(info[2], static_cast<uint32_t>(DevicePairingProtectionLevel::Encryption)));
+    manager->Pair(uuid, kinds, protectionLevel);
     return info.Env().Undefined();
 }
 

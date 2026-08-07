@@ -644,6 +644,11 @@ describe('noble', () => {
       DisplayPin: 0x00000010,
       ProvidePin: 0x00000040,
     };
+    const DevicePairingProtectionLevel = {
+      None: 1,
+      Encryption: 2,
+      EncryptionAndAuthentication: 3,
+    };
 
     // Use a hex id so `_getPeripheralId` accepts it without calling the
     // mocked addressToId (whose return value would otherwise become the
@@ -655,7 +660,8 @@ describe('noble', () => {
       noble.pair(peripheralUuidHex, () => {});
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuidHex,
-        DevicePairingKinds.ConfirmOnly
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
       );
     });
 
@@ -664,7 +670,8 @@ describe('noble', () => {
       noble.pair(peripheralUuidHex, DevicePairingKinds.DisplayPin, () => {});
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuidHex,
-        DevicePairingKinds.DisplayPin
+        DevicePairingKinds.DisplayPin,
+        DevicePairingProtectionLevel.Encryption
       );
     });
 
@@ -672,7 +679,26 @@ describe('noble', () => {
       mockBindings.pair = jest.fn();
       const mask = DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin;
       noble.pair(peripheralUuidHex, mask, () => {});
-      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuidHex, mask);
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        mask,
+        DevicePairingProtectionLevel.Encryption
+      );
+    });
+
+    test('should forward explicit protection level to the binding', () => {
+      mockBindings.pair = jest.fn();
+      noble.pair(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.EncryptionAndAuthentication,
+        () => {}
+      );
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.EncryptionAndAuthentication
+      );
     });
 
     test('should treat function in 2nd position as callback (legacy signature)', () => {
@@ -681,7 +707,19 @@ describe('noble', () => {
       noble.pair(peripheralUuidHex, cb);
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuidHex,
-        DevicePairingKinds.ConfirmOnly
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
+      );
+    });
+
+    test('should treat function in 3rd position as callback (legacy signature)', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, DevicePairingKinds.ConfirmOnly, cb);
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
       );
     });
 
@@ -695,7 +733,8 @@ describe('noble', () => {
       await promise;
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuidHex,
-        DevicePairingKinds.ConfirmOnly
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
       );
     });
 
@@ -707,7 +746,25 @@ describe('noble', () => {
       await promise;
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuidHex,
-        DevicePairingKinds.ProvidePin
+        DevicePairingKinds.ProvidePin,
+        DevicePairingProtectionLevel.Encryption
+      );
+    });
+
+    test('pairAsync should forward explicit protection level', async () => {
+      mockBindings.pair = jest.fn();
+      const promise = noble.pairAsync(
+        peripheralUuidHex,
+        DevicePairingKinds.ProvidePin,
+        DevicePairingProtectionLevel.None
+      );
+      noble.emit(`pair:${peripheralUuidHex}`, null);
+
+      await promise;
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ProvidePin,
+        DevicePairingProtectionLevel.None
       );
     });
 
@@ -720,6 +777,18 @@ describe('noble', () => {
       expect(cb).toHaveBeenCalledWith(expect.any(Error));
       expect(cb.mock.calls[0][0].message).toBe(
         'pair() requires at least one DevicePairingKinds value; DevicePairingKinds.None matches no ceremony'
+      );
+      expect(mockBindings.pair).not.toHaveBeenCalled();
+    });
+
+    test('should reject invalid protection level type', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, DevicePairingKinds.ConfirmOnly, 'invalid', cb);
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(expect.any(Error));
+      expect(cb.mock.calls[0][0].message).toBe(
+        'pair() protectionLevel must be a number (DevicePairingProtectionLevel)'
       );
       expect(mockBindings.pair).not.toHaveBeenCalled();
     });
@@ -774,6 +843,9 @@ describe('noble', () => {
       None: 0,
       ConfirmOnly: 0x00000008,
     };
+    const DevicePairingProtectionLevel = {
+      Encryption: 2,
+    };
 
     test('should delegate to binding with ConfirmOnly default', () => {
       const peripheralUuid = 'aabbccddeeff';
@@ -783,7 +855,8 @@ describe('noble', () => {
 
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuid,
-        DevicePairingKinds.ConfirmOnly
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
       );
       expect(mockBindings.pair).toHaveBeenCalledTimes(1);
     });
@@ -819,6 +892,9 @@ describe('noble', () => {
     const DevicePairingKinds = {
       ConfirmOnly: 0x00000008,
     };
+    const DevicePairingProtectionLevel = {
+      Encryption: 2,
+    };
 
     test('should resolve on success', async () => {
       const peripheralUuid = 'aabbccddeeff';
@@ -831,7 +907,8 @@ describe('noble', () => {
       await expect(promise).resolves.toBeUndefined();
       expect(mockBindings.pair).toHaveBeenCalledWith(
         peripheralUuid,
-        DevicePairingKinds.ConfirmOnly
+        DevicePairingKinds.ConfirmOnly,
+        DevicePairingProtectionLevel.Encryption
       );
     });
 

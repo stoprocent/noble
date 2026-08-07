@@ -396,6 +396,13 @@ await noble.pairAsync(idOrAddress);
 // or
 await peripheral.pairAsync();
 
+// Optionally choose pairing ceremony + protection level (Windows only).
+await noble.pairAsync(
+  idOrAddress,
+  noble.DevicePairingKinds.ConfirmOnly,
+  noble.DevicePairingProtectionLevel.EncryptionAndAuthentication
+);
+
 // Callback form is also available on both.
 noble.pair(idOrAddress, error => { /* ... */ });
 peripheral.pair(error => { /* ... */ });
@@ -415,13 +422,10 @@ noble.on('pair', (peripheral, error) => { /* ... */ });
 - **A connected device is required.** The peripheral must already be
   discovered and connected (present in Noble's peripheral map) before pairing
   is requested. Pairing an unknown/untracked id fails rather than hanging.
-- **Only the `ConfirmOnly` ("Just Works") ceremony is supported.** The
-  handler auto-accepts `ConfirmOnly` requests without a UI prompt. Any other
-  ceremony (`DisplayPin`, `ProvidePassword`, `ConfirmPinMatch`, …) is **not**
-  accepted — this library has no UI to surface a PIN or password — and Windows
-  completes the operation with the corresponding failure status
-  (e.g. `RejectedByHandler` / `AuthenticationNotAllowed`), which is reported
-  back through the `pair` callback/event.
+- **Windows pairing options.** `kind` defaults to `ConfirmOnly` and
+  `protectionLevel` defaults to `Encryption`. You can pass any
+  `DevicePairingKinds` bitmask and (optionally) `DevicePairingProtectionLevel`.
+  For non-ConfirmOnly ceremonies, Windows handles the native pairing UX.
 
 ### Service Methods
 
