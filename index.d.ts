@@ -25,6 +25,25 @@ declare module '@stoprocent/noble' {
 
     export type CharacteristicProperty = 'read' | 'write' | 'indicate' | 'notify' | 'writeWithoutResponse';
 
+    /**
+     * Mirrors WinRT's `DevicePairingKinds` (Windows.Devices.Enumeration).
+     * Bitfield: pass a single kind or OR several together to advertise
+     * which ceremonies the caller knows how to handle.
+     *
+     * Only the Windows binding honors this; `pair()` on hci-socket / dbus /
+     * mac surfaces "Pairing is not supported on this platform" regardless
+     * of the value.
+     */
+    export enum DevicePairingKinds {
+        None = 0,
+        ConfirmOnly = 0x00000008,
+        DisplayPin = 0x00000010,
+        ConfirmPinMatch = 0x00000020,
+        ProvidePin = 0x00000040,
+        ProvidePassword = 0x00000080,
+        ConfirmPassword = 0x00000100,
+    }
+
     export interface ConnectOptions {
         addressType?: PeripheralAddressType;
         minInterval?: number;
@@ -45,26 +64,25 @@ declare module '@stoprocent/noble' {
         stopScanningAsync(): Promise<void>;
         discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
         connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
-        /**
-         * Pair with a peripheral. Windows only; requires an already-connected
-         * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
-         * Rejects with 'Pairing is not supported on this platform' elsewhere.
-         */
-        pairAsync(idOrAddress: PeripheralIdOrAddress): Promise<void>;
+        pairAsync(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds): Promise<void>;
 
         startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
         stopScanning(callback?: () => void): void;
         connect(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
-        /**
-         * Pair with a peripheral. Windows only; requires an already-connected
-         * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
-         * Calls back with 'Pairing is not supported on this platform' elsewhere.
-         */
-        pair(idOrAddress: PeripheralIdOrAddress, callback?: (error: Error | null) => void): void;
         cancelConnect(idOrAddress: PeripheralIdOrAddress, options?: object): void;
         reset(): void;
         stop(): void;
         setAddress(address: string): void;
+
+        /**
+         * Pair with a peripheral. `kind` defaults to
+         * `DevicePairingKinds.ConfirmOnly` (Just Works, no UI). On Windows,
+         * any other kind (e.g. `DisplayPin`) causes Windows to surface its
+         * native pairing dialog — this library does not forward a PIN or
+         * password back to JS. On non-Windows platforms the call surfaces
+         * a "Pairing is not supported" error.
+         */
+        pair(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
     
         on(event: "stateChange", listener: (state: AdapterState) => void): this;
         on(event: "scanStart", listener: () => void): this;
@@ -119,8 +137,7 @@ declare module '@stoprocent/noble' {
         readonly uuid: string;
     
         connectAsync(): Promise<void>;
-        /** Windows only; ConfirmOnly ("Just Works") ceremony only. */
-        pairAsync(): Promise<void>;
+        pairAsync(kind?: DevicePairingKinds): Promise<void>;
         disconnectAsync(): Promise<void>;
         updateRssiAsync(): Promise<number>;
         discoverServicesAsync(): Promise<Service[]>;
@@ -131,8 +148,7 @@ declare module '@stoprocent/noble' {
         writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
 
         connect(callback?: (error: Error | undefined) => void): void;
-        /** Windows only; ConfirmOnly ("Just Works") ceremony only. */
-        pair(callback?: (error: Error | null) => void): void;
+        pair(kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
         disconnect(callback?: () => void): void;
         updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
         discoverServices(): void;

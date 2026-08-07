@@ -33,7 +33,8 @@ describe('peripheral', () => {
       updateRssi: jest.fn(),
       discoverServices: jest.fn(),
       readHandle: jest.fn(),
-      writeHandle: jest.fn()
+      writeHandle: jest.fn(),
+      pair: jest.fn()
     };
     
     peripheral = new Peripheral(
@@ -181,7 +182,7 @@ describe('peripheral', () => {
     test('should delegate to noble, forwarding the callback', () => {
       peripheral.pair();
 
-      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined);
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined, undefined);
       expect(mockNoble.pair).toHaveBeenCalledTimes(1);
     });
 
@@ -190,12 +191,14 @@ describe('peripheral', () => {
 
       peripheral.pair(callback);
 
-      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, callback);
+      // `kind` is forwarded as undefined (1st-arg-was-callback swap), and the
+      // callback is in the 3rd position (noble.pair's new signature).
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined, callback);
       expect(mockNoble.pair).toHaveBeenCalledTimes(1);
 
       // Noble releases the delegated callback through the internal pair:${id}
       // event, so drive the callback it received rather than the peripheral.
-      mockNoble.pair.mock.calls[0][1](null);
+      mockNoble.pair.mock.calls[0][2](null);
       expect(callback).toHaveBeenCalledWith(null);
       expect(callback).toHaveBeenCalledTimes(1);
     });
@@ -205,7 +208,7 @@ describe('peripheral', () => {
       const error = new Error('pairing failed');
 
       peripheral.pair(callback);
-      mockNoble.pair.mock.calls[0][1](error);
+      mockNoble.pair.mock.calls[0][2](error);
 
       expect(callback).toHaveBeenCalledWith(error);
       expect(callback).toHaveBeenCalledTimes(1);
@@ -223,7 +226,17 @@ describe('peripheral', () => {
       peripheral.emit('pair', new Error('late completion after removal'));
       expect(callback).not.toHaveBeenCalled();
 
-      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, callback);
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined, callback);
+    });
+
+    test('should forward explicit kind alongside callback', () => {
+      const kind = 0x00000010; // DevicePairingKinds.DisplayPin
+      const callback = jest.fn();
+
+      peripheral.pair(kind, callback);
+
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, kind, callback);
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -231,18 +244,29 @@ describe('peripheral', () => {
     test('should resolve on success', async () => {
       const promise = peripheral.pairAsync();
       // Noble releases the delegated callback via pair:${id}; simulate it.
-      mockNoble.pair.mock.calls[0][1](null);
+      // After kind-swap, pairAsync calls noble.pair(id, undefined, callback).
+      mockNoble.pair.mock.calls[0][2](null);
 
       await expect(promise).resolves.toBeUndefined();
-      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, expect.any(Function));
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, undefined, expect.any(Function));
       expect(mockNoble.pair).toHaveBeenCalledTimes(1);
     });
 
     test('should reject on error', async () => {
       const promise = peripheral.pairAsync();
-      mockNoble.pair.mock.calls[0][1](new Error('pairing failed'));
+      mockNoble.pair.mock.calls[0][2](new Error('pairing failed'));
 
       await expect(promise).rejects.toThrow('pairing failed');
+    });
+
+    test('should forward explicit kind', async () => {
+      const kind = 0x00000010; // DisplayPin
+      const promise = peripheral.pairAsync(kind);
+      mockNoble.pair.mock.calls[0][2](null);
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(mockNoble.pair).toHaveBeenCalledWith(mockId, kind, expect.any(Function));
+      expect(mockNoble.pair).toHaveBeenCalledTimes(1);
     });
   });
 

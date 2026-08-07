@@ -68,3 +68,21 @@ bool getBool(const Napi::Value& value, bool def)
     }
     return def;
 }
+
+uint32_t getUint32(const Napi::Value& value, uint32_t def)
+{
+    if (value.IsNumber())
+    {
+        double asDouble = value.As<Napi::Number>().DoubleValue();
+        // Reject fractional values to surface caller-side bugs (e.g. a float
+        // that crept in from arithmetic) instead of silently truncating with
+        // Uint32Value(). `DoubleValue() == asDouble` is exact for values in
+        // the int32 range, so the int32 fast path is unaffected.
+        if (asDouble != static_cast<double>(static_cast<int64_t>(asDouble)))
+        {
+            return def;
+        }
+        return static_cast<uint32_t>(asDouble);
+    }
+    return def;
+}

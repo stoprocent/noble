@@ -635,6 +635,94 @@ describe('noble', () => {
     });
   });
 
+  describe('pair', () => {
+    // Mirror lib/pairing-kinds.js — kept in sync manually since these tests
+    // exercise the JS layer (no WinRT binding in scope).
+    const DevicePairingKinds = {
+      None: 0,
+      ConfirmOnly: 0x00000008,
+      DisplayPin: 0x00000010,
+      ProvidePin: 0x00000040,
+    };
+
+    // Use a hex id so `_getPeripheralId` accepts it without calling the
+    // mocked addressToId (whose return value would otherwise become the
+    // forwarded identifier).
+    const peripheralUuidHex = '00112233445566778899aabbccddeeff';
+
+    test('should default to ConfirmOnly when kind is omitted', () => {
+      mockBindings.pair = jest.fn();
+      noble.pair(peripheralUuidHex, () => {});
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly
+      );
+    });
+
+    test('should forward explicit kind to the binding', () => {
+      mockBindings.pair = jest.fn();
+      noble.pair(peripheralUuidHex, DevicePairingKinds.DisplayPin, () => {});
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.DisplayPin
+      );
+    });
+
+    test('should accept a bitmask kind (multiple OR-ed values)', () => {
+      mockBindings.pair = jest.fn();
+      const mask = DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin;
+      noble.pair(peripheralUuidHex, mask, () => {});
+      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuidHex, mask);
+    });
+
+    test('should treat function in 2nd position as callback (legacy signature)', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, cb);
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly
+      );
+    });
+
+    test('pairAsync should default to ConfirmOnly', async () => {
+      mockBindings.pair = jest.fn();
+      const promise = noble.pairAsync(peripheralUuidHex);
+      // pairAsync awaits a `pair:${identifier}` event; emit success
+      // (null error) to resolve the promise.
+      noble.emit(`pair:${peripheralUuidHex}`, null);
+
+      await promise;
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ConfirmOnly
+      );
+    });
+
+    test('pairAsync should forward explicit kind', async () => {
+      mockBindings.pair = jest.fn();
+      const promise = noble.pairAsync(peripheralUuidHex, DevicePairingKinds.ProvidePin);
+      noble.emit(`pair:${peripheralUuidHex}`, null);
+
+      await promise;
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        DevicePairingKinds.ProvidePin
+      );
+    });
+
+    test('should surface deterministic error when binding has no pair method', () => {
+      mockBindings.pair = jest.fn();
+      delete mockBindings.pair;
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, DevicePairingKinds.DisplayPin, cb);
+      expect(cb).toHaveBeenCalledTimes(1);
+      const err = cb.mock.calls[0][0];
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe('Pairing is not supported on this platform');
+    });
+  });
+
   describe('onDisconnect', () => {
     test('should emit disconnect on existing peripheral', () => {
       const emit = jest.fn();
@@ -667,13 +755,23 @@ describe('noble', () => {
   });
 
   describe('pair', () => {
-    test('should delegate to binding', () => {
+    // Mirror lib/pairing-kinds.js — used by these legacy tests for assertions
+    // when the new pair() defaults to ConfirmOnly.
+    const DevicePairingKinds = {
+      None: 0,
+      ConfirmOnly: 0x00000008,
+    };
+
+    test('should delegate to binding with ConfirmOnly default', () => {
       const peripheralUuid = 'aabbccddeeff';
 
       mockBindings.pair = jest.fn();
       noble.pair(peripheralUuid);
 
-      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuid);
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuid,
+        DevicePairingKinds.ConfirmOnly
+      );
       expect(mockBindings.pair).toHaveBeenCalledTimes(1);
     });
 
@@ -705,6 +803,10 @@ describe('noble', () => {
   });
 
   describe('pairAsync', () => {
+    const DevicePairingKinds = {
+      ConfirmOnly: 0x00000008,
+    };
+
     test('should resolve on success', async () => {
       const peripheralUuid = 'aabbccddeeff';
       mockBindings.pair = jest.fn();
@@ -714,7 +816,10 @@ describe('noble', () => {
       noble._onPair(peripheralUuid, true);
 
       await expect(promise).resolves.toBeUndefined();
-      expect(mockBindings.pair).toHaveBeenCalledWith(peripheralUuid);
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuid,
+        DevicePairingKinds.ConfirmOnly
+      );
     });
 
     test('should reject on failure', async () => {

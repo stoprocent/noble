@@ -101,13 +101,25 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
-// pair(deviceUuid)
+// pair(deviceUuid, kinds?)
 Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
 {
     CHECK_MANAGER()
     ARG1(String)
     auto uuid = info[0].As<Napi::String>().Utf8Value();
-    manager->Pair(uuid);
+
+    // `kinds` is a DevicePairingKinds bitmask. The JS layer (noble.js) is
+    // expected to normalize the value before forwarding here — including
+    // rejecting DevicePairingKinds.None — so any default we pick is a
+    // belt-and-suspenders backstop, not a primary code path. We default
+    // to None (0) rather than ConfirmOnly to surface unexpected callers
+    // via the lambda's `(kind & kinds) == 0` check (PairAsync will fail
+    // with RejectedByHandler), instead of silently falling through to a
+    // ceremony the caller never asked for.
+    using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
+    auto kinds = static_cast<DevicePairingKinds>(
+        getUint32(info[1], static_cast<uint32_t>(DevicePairingKinds::None)));
+    manager->Pair(uuid, kinds);
     return info.Env().Undefined();
 }
 
