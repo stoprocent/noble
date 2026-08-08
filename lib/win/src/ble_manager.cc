@@ -435,12 +435,10 @@ bool BLEManager::Pair(const std::string& uuid,
             return true;
         }
 
-        auto unsupportedKinds = static_cast<uint32_t>(
-            winrt::Windows::Devices::Enumeration::DevicePairingKinds::ProvidePin) |
-            static_cast<uint32_t>(
-                winrt::Windows::Devices::Enumeration::DevicePairingKinds::ProvidePassword) |
-            static_cast<uint32_t>(
-                winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmPassword);
+        // These ceremony values are not supported because this library does
+        // not collect PIN/password input to forward into an Accept(...) overload.
+        constexpr uint32_t unsupportedKinds =
+            0x00000040u | 0x00000080u | 0x00000100u;
         if ((static_cast<uint32_t>(kinds) & unsupportedKinds) != 0)
         {
             mEmit.Paired(uuid, false,
