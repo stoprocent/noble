@@ -85,13 +85,16 @@ declare module '@stoprocent/noble' {
         stop(): void;
         setAddress(address: string): void;
 
-        /**
-         * Pair with a peripheral. `kind` defaults to
-         * `DevicePairingKinds.ConfirmOnly` and `protectionLevel` defaults to
-         * `DevicePairingProtectionLevel.Encryption`. On Windows, non-ConfirmOnly
-         * kinds (e.g. `DisplayPin`) use the OS pairing dialog. On non-Windows
-         * platforms the call surfaces a "Pairing is not supported" error.
-         */
+     /**
+      * Pair with a peripheral. `kind` defaults to
+      * `DevicePairingKinds.ConfirmOnly` and `protectionLevel` defaults to
+     * `DevicePairingProtectionLevel.Encryption`. On Windows, `ConfirmOnly`,
+     * `DisplayPin`, and `ConfirmPinMatch` use the OS pairing dialog. PIN /
+     * password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
+     * rejected because this library does not collect secrets to pass into
+     * WinRT. On non-Windows platforms the call surfaces a "Pairing is not
+     * supported" error.
+     */
         pair(idOrAddress: PeripheralIdOrAddress, callback: (error: Error | undefined) => void): void;
         pair(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
         pair(idOrAddress: PeripheralIdOrAddress, kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;

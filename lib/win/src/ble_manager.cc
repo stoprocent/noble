@@ -435,12 +435,25 @@ bool BLEManager::Pair(const std::string& uuid,
             return true;
         }
 
+        auto unsupportedKinds = static_cast<uint32_t>(
+            winrt::Windows::Devices::Enumeration::DevicePairingKinds::ProvidePin) |
+            static_cast<uint32_t>(
+                winrt::Windows::Devices::Enumeration::DevicePairingKinds::ProvidePassword) |
+            static_cast<uint32_t>(
+                winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmPassword);
+        if ((static_cast<uint32_t>(kinds) & unsupportedKinds) != 0)
+        {
+            mEmit.Paired(uuid, false,
+                         "pairing kinds requiring a PIN or password are not supported");
+            return true;
+        }
+
         // Always go through `pairing.Custom()`: only DeviceInformationCustomPairing
         // accepts a `DevicePairingKinds` mask (DeviceInformationPairing.PairAsync
-        // takes only a protection level). The caller-supplied `kinds` is the set
-        // of ceremonies we know how to handle — for ConfirmOnly this is the
-        // Just Works path (no UI); for DisplayPin / ProvidePin / etc. Windows
-        // surfaces its native pairing dialog after we Accept() below.
+        // takes only a protection level). The caller-supplied `kinds` may
+        // include ConfirmOnly, DisplayPin, or ConfirmPinMatch; PIN/password
+        // ceremonies are rejected before we get here because this library does
+        // not provide a way to collect or forward secrets to Accept(...).
         //
         // The PairingRequested lambda must Accept() exactly once for any kind
         // the caller advertised in `kinds`. Some devices negotiated through
@@ -474,6 +487,7 @@ bool BLEManager::Pair(const std::string& uuid,
                 // Windows treats the handler returning as a rejection.
             });
         handlerRegistered = true;
+
         auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
         custom.PairAsync(kinds, protectionLevel)
             .Completed(completed);

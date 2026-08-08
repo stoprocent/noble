@@ -391,6 +391,11 @@ peripheral.on('disconnect', reason => {
 ### Pairing
 
 ```typescript
+import noble, {
+  DevicePairingKinds,
+  DevicePairingProtectionLevel,
+} from '@stoprocent/noble';
+
 // Pair at the Noble level (by ID or address) or on a Peripheral instance.
 await noble.pairAsync(idOrAddress);
 // or
@@ -399,8 +404,8 @@ await peripheral.pairAsync();
 // Optionally choose pairing ceremony + protection level (Windows only).
 await noble.pairAsync(
   idOrAddress,
-  noble.DevicePairingKinds.ConfirmOnly,
-  noble.DevicePairingProtectionLevel.EncryptionAndAuthentication
+  DevicePairingKinds.ConfirmOnly,
+  DevicePairingProtectionLevel.EncryptionAndAuthentication
 );
 
 // Callback form is also available on both.
@@ -423,9 +428,12 @@ noble.on('pair', (peripheral, error) => { /* ... */ });
   discovered and connected (present in Noble's peripheral map) before pairing
   is requested. Pairing an unknown/untracked id fails rather than hanging.
 - **Windows pairing options.** `kind` defaults to `ConfirmOnly` and
-  `protectionLevel` defaults to `Encryption`. You can pass any
-  `DevicePairingKinds` bitmask and (optionally) `DevicePairingProtectionLevel`.
-  For non-ConfirmOnly ceremonies, Windows handles the native pairing UX.
+  `protectionLevel` defaults to `Encryption`. You can pass a
+  `DevicePairingKinds` bitmask (single or OR-ed values) and (optionally)
+  `DevicePairingProtectionLevel`.
+  `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI;
+  PIN/password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
+  rejected because this library does not collect secrets to pass into WinRT.
 
 ### Service Methods
 

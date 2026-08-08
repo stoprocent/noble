@@ -768,6 +768,17 @@ describe('noble', () => {
       );
     });
 
+    test('should reject invalid kind values', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+      noble.pair(peripheralUuidHex, Number.NaN, cb);
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(expect.any(Error));
+      expect(cb.mock.calls[0][0].message).toBe(
+        'pair() kind must be a finite uint32 DevicePairingKinds bitmask'
+      );
+      expect(mockBindings.pair).not.toHaveBeenCalled();
+    });
 
     test('should reject DevicePairingKinds.None (empty mask)', () => {
       mockBindings.pair = jest.fn();
@@ -784,11 +795,11 @@ describe('noble', () => {
     test('should reject invalid protection level type', () => {
       mockBindings.pair = jest.fn();
       const cb = jest.fn();
-      noble.pair(peripheralUuidHex, DevicePairingKinds.ConfirmOnly, 'invalid', cb);
+      noble.pair(peripheralUuidHex, DevicePairingKinds.ConfirmOnly, 1.5, cb);
       expect(cb).toHaveBeenCalledTimes(1);
       expect(cb).toHaveBeenCalledWith(expect.any(Error));
       expect(cb.mock.calls[0][0].message).toBe(
-        'pair() protectionLevel must be a number (DevicePairingProtectionLevel)'
+        'pair() protectionLevel must be a finite uint32 DevicePairingProtectionLevel'
       );
       expect(mockBindings.pair).not.toHaveBeenCalled();
     });
