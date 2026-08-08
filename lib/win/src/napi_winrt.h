@@ -6,6 +6,7 @@
 
 std::vector<winrt::guid> getUuidArray(const Napi::Value& value);
 bool getBool(const Napi::Value& value, bool def);
+uint32_t getUint32(const Napi::Value& value, uint32_t def);
 
 winrt::guid napiToUuid(Napi::String string);
 Data napiToData(Napi::Buffer<unsigned char> buffer);
