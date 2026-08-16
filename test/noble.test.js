@@ -48,6 +48,19 @@ describe('noble', () => {
     jest.clearAllMocks();
   });
 
+  it('forwards warnings from the bindings', () => {
+    const received = [];
+    noble.on('warning', message => received.push(message));
+
+    void noble.state; // registering the bindings listeners is deferred until first use
+
+    const registered = mockBindings.on.mock.calls.find(([event]) => event === 'warning');
+    expect(registered).toBeDefined();
+    registered[1]('the mtu connect option is not supported on the dbus backend');
+
+    expect(received).toEqual(['the mtu connect option is not supported on the dbus backend']);
+  });
+
   describe('startScanning', () => {
   
     test('should delegate to binding', () => {
