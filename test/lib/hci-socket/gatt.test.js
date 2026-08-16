@@ -755,9 +755,63 @@ describe('hci-socket gatt', () => {
 
     assert.calledOnce(queueCommand);
 
+    // 0x3312 is larger than the requested 256, so ATT_MTU is the requested value.
     queueCommand.callArgWith(1, Buffer.from([0x03, 0x12, 0x33]));
-    assert.calledOnceWithExactly(callback, address, 13074);
-    should(gatt._mtu).equal(13074);
+    assert.calledOnceWithExactly(callback, address, 256);
+    should(gatt._mtu).equal(256);
+  });
+
+  it('exchangeMtu keeps the peer mtu when it is the smaller one', () => {
+    const queueCommand = sinon.spy();
+    const callback = sinon.stub();
+
+    gatt._queueCommand = queueCommand;
+    gatt.on('mtu', callback);
+    gatt.exchangeMtu();
+
+    // 247, the value a peripheral typically answers to a 256 request.
+    queueCommand.callArgWith(1, Buffer.from([0x03, 0xf7, 0x00]));
+    assert.calledOnceWithExactly(callback, address, 247);
+    should(gatt._mtu).equal(247);
+  });
+
+  it('exchangeMtu does not let a peer raise the mtu above the requested one', () => {
+    const requesting = new Gatt(address, aclStream, 23);
+    const queueCommand = sinon.spy();
+    const callback = sinon.stub();
+
+    requesting._queueCommand = queueCommand;
+    requesting.on('mtu', callback);
+    requesting.exchangeMtu();
+
+    should(queueCommand.firstCall.args[0]).deepEqual(Buffer.from([0x02, 0x17, 0x00]));
+
+    queueCommand.callArgWith(1, Buffer.from([0x03, 0xf7, 0x00]));
+    should(requesting._mtu).equal(23);
+  });
+
+  describe('desired mtu validation', () => {
+    it('defaults when no mtu is requested', () => {
+      should(new Gatt(address, aclStream)._desired_mtu).equal(256);
+    });
+
+    it('keeps a usable requested mtu', () => {
+      should(new Gatt(address, aclStream, 23)._desired_mtu).equal(23);
+      should(new Gatt(address, aclStream, 517)._desired_mtu).equal(517);
+    });
+
+    it('falls back to the default for values the peer could never be asked for', () => {
+      for (const unusable of [22, 518, -1, 70000, 1.5, 'abc', NaN, {}]) {
+        should(new Gatt(address, aclStream, unusable)._desired_mtu).equal(256);
+      }
+    });
+
+    it('builds a valid request buffer for every accepted mtu', () => {
+      for (const mtu of [23, 256, 517, -1, 70000, 'abc']) {
+        const built = new Gatt(address, aclStream, mtu);
+        should(() => built.mtuRequest(built._desired_mtu)).not.throw();
+      }
+    });
   });
 
   it('addService', () => {
