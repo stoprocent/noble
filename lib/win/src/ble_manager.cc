@@ -221,7 +221,11 @@ void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
             }
         }
 
-        if (!found) {
+        // Windows reports the scan response separately from the advertising
+        // packet. Once a device has matched the service filter, keep its
+        // follow-up packets so Complete Local Name and other scan-response
+        // fields can update the existing Peripheral.
+        if (!found && mDeviceMap.find(uuid) == mDeviceMap.end()) {
             return;
         }
     }
