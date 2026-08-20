@@ -68,3 +68,26 @@ bool getBool(const Napi::Value& value, bool def)
     }
     return def;
 }
+
+uint32_t getUint32(const Napi::Value& value, uint32_t def)
+{
+    if (!value.IsNumber())
+    {
+        return def;
+    }
+    
+    const double asDouble = value.As<Napi::Number>().DoubleValue();
+    // Reject NaN / infinities / negatives / values outside uint32 range.
+    // (NaN makes both comparisons false, so it is rejected here.)
+    if (!(asDouble >= 0.0 && asDouble <= 4294967295.0))
+    {
+        return def;
+    }
+    const uint32_t asUint32 = static_cast<uint32_t>(asDouble);
+    // Reject fractional values (and values not exactly representable as uint32).
+    if (asDouble != static_cast<double>(asUint32))
+    {
+        return def;
+    }
+    return asUint32;
+}

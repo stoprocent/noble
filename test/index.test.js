@@ -8,4 +8,13 @@ describe('public exports', () => {
       'Connection Failed to be Established'
     );
   });
+
+  test('exposes DevicePairingProtectionLevel constants', () => {
+    expect(noble.DevicePairingProtectionLevel).toEqual({
+      Default: 0,
+      None: 1,
+      Encryption: 2,
+      EncryptionAndAuthentication: 3,
+    });
+  });
 });
