@@ -642,6 +642,7 @@ describe('noble', () => {
       None: 0,
       ConfirmOnly: 0x00000008,
       DisplayPin: 0x00000010,
+      ConfirmPinMatch: 0x00000020,
       ProvidePin: 0x00000040,
     };
     const DevicePairingProtectionLevel = {
@@ -654,6 +655,17 @@ describe('noble', () => {
     // mocked addressToId (whose return value would otherwise become the
     // forwarded identifier).
     const peripheralUuidHex = '00112233445566778899aabbccddeeff';
+
+    test('should report pairing state exposed by the binding', () => {
+      mockBindings.isPaired = jest.fn(() => true);
+
+      expect(noble.isPaired(peripheralUuidHex)).toBe(true);
+      expect(mockBindings.isPaired).toHaveBeenCalledWith(peripheralUuidHex);
+    });
+
+    test('should report unpaired when the binding has no pairing-state API', () => {
+      expect(noble.isPaired(peripheralUuidHex)).toBe(false);
+    });
 
     test('should default to ConfirmOnly when kind is omitted', () => {
       mockBindings.pair = jest.fn();
@@ -699,6 +711,28 @@ describe('noble', () => {
         DevicePairingKinds.ConfirmOnly,
         DevicePairingProtectionLevel.EncryptionAndAuthentication
       );
+    });
+
+    test('should derive authenticated pairing defaults from a PIN option', () => {
+      mockBindings.pair = jest.fn();
+      noble.pair(peripheralUuidHex, { pin: '123456' });
+
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        '123456'
+      );
+    });
+
+    test('should reject a non-string PIN', () => {
+      mockBindings.pair = jest.fn();
+      const cb = jest.fn();
+
+      noble.pair(peripheralUuidHex, { pin: 123456 }, cb);
+
+      expect(cb).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'pair() options.pin must be a string'
+      }));
+      expect(mockBindings.pair).not.toHaveBeenCalled();
     });
 
     test('should treat function in 2nd position as callback (legacy signature)', () => {
@@ -765,6 +799,18 @@ describe('noble', () => {
         peripheralUuidHex,
         DevicePairingKinds.ProvidePin,
         DevicePairingProtectionLevel.None
+      );
+    });
+
+    test('pairAsync should forward PIN options', async () => {
+      mockBindings.pair = jest.fn();
+      const promise = noble.pairAsync(peripheralUuidHex, { pin: '123456' });
+      noble.emit(`pair:${peripheralUuidHex}`, null);
+
+      await promise;
+      expect(mockBindings.pair).toHaveBeenCalledWith(
+        peripheralUuidHex,
+        '123456'
       );
     });
 

@@ -63,6 +63,11 @@ declare module '@stoprocent/noble' {
         timeout?: number;
     }
 
+    export interface PairOptions {
+        /** PIN displayed by or configured on the peripheral. Windows only. */
+        pin?: string;
+    }
+
     export class Noble extends EventEmitter {
     
         constructor(bindings: any);
@@ -75,6 +80,9 @@ declare module '@stoprocent/noble' {
         stopScanningAsync(): Promise<void>;
         discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
         connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
+        /** Windows only; returns whether WinRT reports that the device is paired. */
+        isPaired(idOrAddress: PeripheralIdOrAddress): boolean;
+        pairAsync(idOrAddress: PeripheralIdOrAddress, options?: PairOptions): Promise<void>;
         pairAsync(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, protectionLevel?: DevicePairingProtectionLevel): Promise<void>;
 
         startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
@@ -88,14 +96,13 @@ declare module '@stoprocent/noble' {
      /**
       * Pair with a peripheral. `kind` defaults to
       * `DevicePairingKinds.ConfirmOnly` and `protectionLevel` defaults to
-     * `DevicePairingProtectionLevel.Encryption`. On Windows, `ConfirmOnly`,
-     * `DisplayPin`, and `ConfirmPinMatch` use the OS pairing dialog. PIN /
-     * password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
-     * rejected because this library does not collect secrets to pass into
-     * WinRT. On non-Windows platforms the call surfaces a "Pairing is not
-     * supported" error.
-     */
+      * `DevicePairingProtectionLevel.Encryption`. PairOptions can supply a PIN,
+      * enabling ConfirmOnly, ProvidePin, and ConfirmPinMatch with authenticated
+      * encryption. On non-Windows platforms the call surfaces a "Pairing is
+      * not supported" error.
+      */
         pair(idOrAddress: PeripheralIdOrAddress, callback: (error: Error | undefined) => void): void;
+        pair(idOrAddress: PeripheralIdOrAddress, options: PairOptions, callback?: (error: Error | undefined) => void): void;
         pair(idOrAddress: PeripheralIdOrAddress, kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
         pair(idOrAddress: PeripheralIdOrAddress, kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;
     
@@ -152,6 +159,9 @@ declare module '@stoprocent/noble' {
         readonly uuid: string;
     
         connectAsync(): Promise<void>;
+        /** Windows only; returns whether WinRT reports that the device is paired. */
+        isPaired(): boolean;
+        pairAsync(options?: PairOptions): Promise<void>;
         pairAsync(kind?: DevicePairingKinds, protectionLevel?: DevicePairingProtectionLevel): Promise<void>;
         disconnectAsync(): Promise<void>;
         updateRssiAsync(): Promise<number>;
@@ -164,6 +174,7 @@ declare module '@stoprocent/noble' {
 
         connect(callback?: (error: Error | undefined) => void): void;
         pair(callback: (error: Error | undefined) => void): void;
+        pair(options: PairOptions, callback?: (error: Error | undefined) => void): void;
         pair(kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
         pair(kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;
         disconnect(callback?: () => void): void;

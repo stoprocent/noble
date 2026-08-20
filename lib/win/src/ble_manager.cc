@@ -221,7 +221,11 @@ void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
             }
         }
 
-        if (!found) {
+        // Windows reports the scan response separately from the advertising
+        // packet. Once a device has matched the service filter, keep its
+        // follow-up packets so Complete Local Name and other scan-response
+        // fields can update the existing Peripheral.
+        if (!found && mDeviceMap.find(uuid) == mDeviceMap.end()) {
             return;
         }
     }
@@ -388,9 +392,28 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
     mEmit.MTU(uuid, mtu);
 }
 
+bool BLEManager::IsPaired(const std::string& uuid)
+{
+    auto it = mDeviceMap.find(uuid);
+    if (it == mDeviceMap.end() || !it->second.device.has_value())
+    {
+        return false;
+    }
+
+    try
+    {
+        return it->second.device->DeviceInformation().Pairing().IsPaired();
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 bool BLEManager::Pair(const std::string& uuid,
                       winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds,
-                      winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel)
+                      winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel,
+                      const std::string& pin)
 {
     auto it = mDeviceMap.find(uuid);
     if (it == mDeviceMap.end() || !it->second.device.has_value())
@@ -435,23 +458,33 @@ bool BLEManager::Pair(const std::string& uuid,
             return true;
         }
 
-        // These ceremony values are not supported because this library does
-        // not collect PIN/password input to forward into an Accept(...) overload.
-        constexpr uint32_t unsupportedKinds =
-            0x00000040u | 0x00000080u | 0x00000100u;
-        if ((static_cast<uint32_t>(kinds) & unsupportedKinds) != 0)
+        if (!pin.empty())
+        {
+            protectionLevel = DevicePairingProtectionLevel::EncryptionAndAuthentication;
+        }
+
+        // Password ceremonies remain unsupported. ProvidePin is supported only
+        // when the caller supplied the secret through PairOptions.
+        constexpr uint32_t passwordKinds = 0x00000080u | 0x00000100u;
+        auto requestedKinds = static_cast<uint32_t>(kinds);
+        if ((requestedKinds & passwordKinds) != 0)
         {
             mEmit.Paired(uuid, false,
-                         "pairing kinds requiring a PIN or password are not supported");
+                         "pairing kinds requiring a password are not supported");
+            return true;
+        }
+        if ((requestedKinds & static_cast<uint32_t>(DevicePairingKinds::ProvidePin)) != 0 &&
+            pin.empty())
+        {
+            mEmit.Paired(uuid, false, "ProvidePin pairing requires a PIN");
             return true;
         }
 
         // Always go through `pairing.Custom()`: only DeviceInformationCustomPairing
         // accepts a `DevicePairingKinds` mask (DeviceInformationPairing.PairAsync
         // takes only a protection level). The caller-supplied `kinds` may
-        // include ConfirmOnly, DisplayPin, or ConfirmPinMatch; PIN/password
-        // ceremonies are rejected before we get here because this library does
-        // not provide a way to collect or forward secrets to Accept(...).
+        // include the UI-backed ceremonies plus ProvidePin when a caller has
+        // supplied the secret. Password ceremonies are rejected above.
         //
         // The PairingRequested lambda must Accept() exactly once for any kind
         // the caller advertised in `kinds`. Some devices negotiated through
@@ -459,12 +492,11 @@ bool BLEManager::Pair(const std::string& uuid,
         // compatible fallback so pairing does not fail with status=Failed.
         // For other kinds outside the mask we return without Accept(), which
         // Windows treats as a rejection and PairAsync completes with
-        // RejectedByHandler / AuthenticationNotAllowed. We never forward a PIN
-        // or password back to JS — Windows drives the UI for non-ConfirmOnly
-        // ceremonies.
+        // RejectedByHandler / AuthenticationNotAllowed. Caller-provided PINs
+        // are used only for ProvidePin and to verify ConfirmPinMatch.
         custom = pairing.Custom();
         token = custom.PairingRequested(
-            [kinds](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
+            [kinds, pin](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
                 winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
                 auto kind = args.PairingKind();
                 auto kindMask = static_cast<uint32_t>(kind);
@@ -477,6 +509,23 @@ bool BLEManager::Pair(const std::string& uuid,
                     confirmPinMatchRequested &&
                     kind == winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmOnly;
                 LOGE("pairing requested, kind=%d", static_cast<int>(kind));
+                if (kind == DevicePairingKinds::ProvidePin)
+                {
+                    if (!pin.empty() && (kindMask & requestedKinds) != 0)
+                    {
+                        args.Accept(winrt::to_hstring(pin));
+                    }
+                    return;
+                }
+                if (kind == DevicePairingKinds::ConfirmPinMatch && !pin.empty())
+                {
+                    if ((kindMask & requestedKinds) != 0 &&
+                        winrt::to_string(args.Pin()) == pin)
+                    {
+                        args.Accept();
+                    }
+                    return;
+                }
                 if ((kindMask & requestedKinds) != 0 || confirmOnlyFallback)
                 {
                     args.Accept();
