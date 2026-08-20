@@ -22,10 +22,12 @@ public:
     void Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates);
     void StopScan();
     bool Connect(const std::string& uuid);
+    bool IsPaired(const std::string& uuid);
     bool Pair(
         const std::string& uuid,
         winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds,
-        winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel);
+        winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel,
+        const std::string& pin = "");
     bool Disconnect(const std::string& uuid);
     bool CancelConnect(const std::string& uuid);
     bool UpdateRSSI(const std::string& uuid);

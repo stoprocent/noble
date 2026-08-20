@@ -101,28 +101,56 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
     return info.Env().Undefined();
 }
 
-// pair(deviceUuid, kinds?, protectionLevel?)
+// isPaired(deviceUuid)
+Napi::Value NobleWinrt::IsPaired(const Napi::CallbackInfo& info)
+{
+    CHECK_MANAGER()
+    ARG1(String)
+    auto uuid = info[0].As<Napi::String>().Utf8Value();
+    return Napi::Boolean::New(info.Env(), manager->IsPaired(uuid));
+}
+
+// pair(deviceUuid, pin?) or pair(deviceUuid, kinds?, protectionLevel?, pin?)
 Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
 {
     CHECK_MANAGER()
     ARG1(String)
     auto uuid = info[0].As<Napi::String>().Utf8Value();
 
-    // `kinds` is a DevicePairingKinds bitmask. The JS layer (noble.js) is
-    // expected to normalize the value before forwarding here — including
-    // rejecting DevicePairingKinds.None — so any default we pick is a
-    // belt-and-suspenders backstop, not a primary code path. We default
-    // to None (0) rather than ConfirmOnly to surface unexpected callers
-    // via the lambda's `(kind & kinds) == 0` check (PairAsync will fail
-    // with RejectedByHandler), instead of silently falling through to a
-    // ceremony the caller never asked for.
     using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
     using winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel;
-    auto kinds = static_cast<DevicePairingKinds>(
-        getUint32(info[1], static_cast<uint32_t>(DevicePairingKinds::None)));
-    auto protectionLevel = static_cast<DevicePairingProtectionLevel>(
-        getUint32(info[2], static_cast<uint32_t>(DevicePairingProtectionLevel::Encryption)));
-    manager->Pair(uuid, kinds, protectionLevel);
+    auto kinds = DevicePairingKinds::ConfirmOnly;
+    auto protectionLevel = DevicePairingProtectionLevel::Encryption;
+    std::string pin;
+
+    // Preserve the PIN-specific binding ABI used by existing prebuilds and
+    // callers: pair(deviceUuid, pin). The general API uses the numeric WinRT
+    // kind/protection arguments instead.
+    if (info.Length() > 1 && info[1].IsString())
+    {
+        pin = info[1].As<Napi::String>().Utf8Value();
+        kinds = static_cast<DevicePairingKinds>(
+            static_cast<uint32_t>(DevicePairingKinds::ConfirmOnly) |
+            static_cast<uint32_t>(DevicePairingKinds::ProvidePin) |
+            static_cast<uint32_t>(DevicePairingKinds::ConfirmPinMatch));
+        protectionLevel = DevicePairingProtectionLevel::EncryptionAndAuthentication;
+    }
+    else if (info.Length() > 1)
+    {
+        kinds = static_cast<DevicePairingKinds>(
+            getUint32(info[1], static_cast<uint32_t>(DevicePairingKinds::None)));
+        protectionLevel = static_cast<DevicePairingProtectionLevel>(
+            getUint32(info[2], static_cast<uint32_t>(DevicePairingProtectionLevel::Encryption)));
+        if (info.Length() > 3 && !info[3].IsUndefined())
+        {
+            if (!info[3].IsString())
+            {
+                THROW("The optional PIN argument must be a string")
+            }
+            pin = info[3].As<Napi::String>().Utf8Value();
+        }
+    }
+    manager->Pair(uuid, kinds, protectionLevel, pin);
     return info.Env().Undefined();
 }
 
@@ -340,6 +368,7 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
         NobleWinrt::InstanceMethod("startScanning", &NobleWinrt::Scan),
         NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
         NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
+        NobleWinrt::InstanceMethod("isPaired", &NobleWinrt::IsPaired),
         NobleWinrt::InstanceMethod("pair", &NobleWinrt::Pair),
         NobleWinrt::InstanceMethod("disconnect", &NobleWinrt::Disconnect),
         NobleWinrt::InstanceMethod("cancelConnect", &NobleWinrt::CancelConnect),
