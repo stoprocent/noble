@@ -724,6 +724,174 @@ describe('dbus/bindings', () => {
     });
   });
 
+  describe('discovery is paused while connecting', () => {
+    const devicePath = '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF';
+    const otherPath = '/org/bluez/hci0/dev_11_22_33_44_55_66';
+
+    function seedDevices () {
+      resetState(adapterTree({
+        [devicePath]: {
+          'org.bluez.Device1': { Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', Connected: false }
+        },
+        [otherPath]: {
+          'org.bluez.Device1': { Address: '11:22:33:44:55:66', AddressType: 'public', Connected: false }
+        }
+      }));
+    }
+
+    const adapterMethods = () => state.ifaceCalls
+      .filter(c => c.iface === 'org.bluez.Adapter1')
+      .map(c => c.method);
+
+    async function startScanning (bindings) {
+      bindings.start();
+      await flush();
+      bindings.startScanning([], false);
+      await flush();
+      state.ifaceCalls.length = 0;
+    }
+
+    // Resolves the connect the way BlueZ does: Connected + ServicesResolved.
+    function completeConnect (path) {
+      makeProxy(path)
+        .getInterface('org.freedesktop.DBus.Properties')
+        .emit('PropertiesChanged', 'org.bluez.Device1', wrapDict({ Connected: true, ServicesResolved: true }));
+    }
+
+    test('stops discovery before Connect and restarts it once the attempt succeeds', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      await startScanning(bindings);
+
+      bindings.connect('aabbccddeeff');
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      completeConnect(devicePath);
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+      expect(bindings._isScanning).toBe(true);
+    });
+
+    test('restarts discovery when the attempt fails', async () => {
+      seedDevices();
+      makeProxy(devicePath).getInterface('org.bluez.Device1').Connect =
+        () => Promise.reject(new Error('le-connection-abort-by-local'));
+
+      const bindings = new DbusBindings();
+      const connects = [];
+      bindings.on('connect', (id, err) => connects.push([id, err]));
+      await startScanning(bindings);
+
+      bindings.connect('aabbccddeeff');
+      await flush();
+
+      expect(connects[0][1]).toBeInstanceOf(Error);
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+    });
+
+    test('does not touch discovery when no scan is running', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+      state.ifaceCalls.length = 0;
+
+      bindings.connect('aabbccddeeff');
+      await flush();
+      completeConnect(devicePath);
+      await flush();
+
+      expect(adapterMethods()).toEqual([]);
+    });
+
+    test('parallel connects stop discovery once and restart it after the last one', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      await startScanning(bindings);
+
+      bindings.connect('aabbccddeeff');
+      bindings.connect('112233445566');
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      completeConnect(devicePath);
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      completeConnect(otherPath);
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+    });
+
+    test('an explicit stopScanning during a connect wins over the resume', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      await startScanning(bindings);
+
+      bindings.connect('aabbccddeeff');
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      bindings.stopScanning();
+      await flush();
+      completeConnect(devicePath);
+      await flush();
+
+      // No second StopDiscovery (already paused) and no resume of a scan the caller ended.
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+      expect(bindings._isScanning).toBe(false);
+    });
+
+    test('a first scan started during a connect still reaches BlueZ once the connect ends', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      bindings.start();
+      await flush();
+      state.ifaceCalls.length = 0;
+
+      // Connect while no scan is running, so nothing is paused.
+      bindings.connect('aabbccddeeff');
+      await flush();
+      expect(adapterMethods()).toEqual([]);
+
+      bindings.startScanning([], false);
+      await flush();
+      expect(adapterMethods()).toEqual(['SetDiscoveryFilter']);
+      expect(bindings._isScanning).toBe(true);
+
+      completeConnect(devicePath);
+      await flush();
+
+      // Without the deferral the scan would be reported as running but never started.
+      expect(adapterMethods()).toEqual(['SetDiscoveryFilter', 'StartDiscovery']);
+    });
+
+    test('a startScanning during a connect defers StartDiscovery to the resume', async () => {
+      seedDevices();
+      const bindings = new DbusBindings();
+      await startScanning(bindings);
+
+      bindings.connect('aabbccddeeff');
+      await flush();
+      bindings.stopScanning();
+      await flush();
+      bindings.startScanning([], false);
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'SetDiscoveryFilter']);
+      expect(bindings._isScanning).toBe(true);
+
+      completeConnect(devicePath);
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'SetDiscoveryFilter', 'StartDiscovery']);
+    });
+  });
+
   describe('late-arriving advertisement data during scan', () => {
     const devicePath = '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF';
 
