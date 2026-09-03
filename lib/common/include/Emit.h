@@ -16,9 +16,9 @@ public:
     void Address(const std::string& address);
     void ScanState(bool start);
     void Scan(const std::string& uuid, int rssi, const Peripheral& peripheral);
-    void Connected(const std::string& uuid, const std::string& error = "");
+    void Connected(const std::string& uuid, const std::string& error = "", const std::string& errorDomain = "", int errorCode = 0);
     void Paired(const std::string& uuid, bool paired, const std::string& error = "");
-    void Disconnected(const std::string& uuid);
+    void Disconnected(const std::string& uuid, const std::string& error = "", const std::string& errorDomain = "", int errorCode = 0);
     void MTU(const std::string& uuid, int mtu);
     void RSSI(const std::string& uuid, int rssi, const std::string& error = "");
     void ServicesDiscovered(const std::string& uuid, const std::vector<std::string>& serviceUuids, const std::string& error = "");

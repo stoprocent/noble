@@ -14,6 +14,18 @@ Napi::String toUuid(Napi::Env& env, const std::string& uuid)
     return _s(str);
 }
 
+Napi::Object toNativeError(Napi::Env& env, const std::string& message,
+                           const std::string& domain, int code)
+{
+    auto error = Napi::Error::New(env, _s(message)).Value();
+    if (!domain.empty())
+    {
+        error.Set(_s("nativeErrorDomain"), _s(domain));
+        error.Set(_s("nativeErrorCode"), _n(code));
+    }
+    return error;
+}
+
 Napi::String toAddressType(Napi::Env& env, const AddressType& type)
 {
     if (type == PUBLIC)
@@ -146,11 +158,12 @@ void Emit::Scan(const std::string& uuid, int rssi, const Peripheral& peripheral)
     });
 }
 
-void Emit::Connected(const std::string& uuid, const std::string& error)
+void Emit::Connected(const std::string& uuid, const std::string& error,
+                     const std::string& errorDomain, int errorCode)
 {
-    mCallback->call([uuid, error](Napi::Env env, std::vector<napi_value>& args) {
+    mCallback->call([uuid, error, errorDomain, errorCode](Napi::Env env, std::vector<napi_value>& args) {
         // emit('connect', deviceUuid) error added here
-        args = { _s("connect"), _u(uuid), error.empty() ? env.Null() : _e(error) };
+        args = { _s("connect"), _u(uuid), error.empty() ? env.Null() : toNativeError(env, error, errorDomain, errorCode) };
     });
 }
 
@@ -162,11 +175,16 @@ void Emit::Paired(const std::string& uuid, bool paired, const std::string& error
     });
 }
 
-void Emit::Disconnected(const std::string& uuid)
+void Emit::Disconnected(const std::string& uuid, const std::string& error,
+                        const std::string& errorDomain, int errorCode)
 {
-    mCallback->call([uuid](Napi::Env env, std::vector<napi_value>& args) {
-        // emit('disconnect', deviceUuid);
-        args = { _s("disconnect"), _u(uuid) };
+    mCallback->call([uuid, error, errorDomain, errorCode](Napi::Env env, std::vector<napi_value>& args) {
+        if (error.empty()) {
+            // Preserve the existing emit('disconnect', deviceUuid) signature.
+            args = { _s("disconnect"), _u(uuid) };
+        } else {
+            args = { _s("disconnect"), _u(uuid), toNativeError(env, error, errorDomain, errorCode) };
+        }
     });
 }
 

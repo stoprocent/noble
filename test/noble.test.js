@@ -845,6 +845,24 @@ describe('noble', () => {
       expect(warningCallback).toHaveBeenCalledTimes(1);
       expect(noble._peripherals.size).toBe(0);
     });
+
+    test('should reject a pending connection with the native disconnect error', () => {
+      const error = Object.assign(new Error('Peer removed pairing information'), {
+        nativeErrorDomain: 'CBErrorDomain',
+        nativeErrorCode: 14
+      });
+      const peripheral = { state: 'connecting', emit: jest.fn() };
+      const connectCallback = jest.fn();
+      noble._peripherals.set('uuid', peripheral);
+      noble.once(`connect:uuid`, connectCallback);
+
+      noble._onDisconnect('uuid', error);
+
+      expect(connectCallback).toHaveBeenCalledWith(error);
+      expect(peripheral.emit).toHaveBeenNthCalledWith(1, 'connect', error);
+      expect(peripheral.emit).toHaveBeenNthCalledWith(2, 'disconnect', error);
+      expect(peripheral.state).toBe('disconnected');
+    });
   });
 
   describe('pair', () => {

@@ -4,6 +4,34 @@
 
 #import <Foundation/Foundation.h>
 
+namespace {
+struct NativeErrorDetails {
+    std::string message;
+    std::string domain;
+    int code = 0;
+};
+
+NativeErrorDetails getNativeErrorDetails(NSError *error, const std::string& fallbackMessage)
+{
+    NativeErrorDetails details = { fallbackMessage, "", 0 };
+    if (!error) {
+        return details;
+    }
+
+    NSString *message = [NSString stringWithFormat:@"%@:%ld %@", error.domain, (long)error.code, error.localizedDescription];
+    const char *utf8Message = [message UTF8String];
+    if (utf8Message) {
+        details.message = std::string(utf8Message);
+    }
+    const char *utf8Domain = [error.domain UTF8String];
+    if (utf8Domain) {
+        details.domain = std::string(utf8Domain);
+    }
+    details.code = static_cast<int>(error.code);
+    return details;
+}
+} // namespace
+
 @interface BLEManager ()
 - (void)updateMtuForPeripheral:(CBPeripheral*) peripheral;
 @end
@@ -196,7 +224,8 @@
 - (void) centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
     [self.peripherals removeObjectForKey:getNSUuid(peripheral)];
     std::string uuid = getUuid(peripheral);
-    emit.Connected(uuid, "connection failed");
+    const auto details = getNativeErrorDetails(error, "connection failed");
+    emit.Connected(uuid, details.message, details.domain, details.code);
 }
 
 - (BOOL)disconnect:(NSString*) uuid {
@@ -210,7 +239,8 @@
 -(void) centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
     std::string uuid = getUuid(peripheral);
     [self.peripherals removeObjectForKey:getNSUuid(peripheral)];
-    emit.Disconnected(uuid);
+    const auto details = getNativeErrorDetails(error, "");
+    emit.Disconnected(uuid, details.message, details.domain, details.code);
 }
 
 - (BOOL)updateRSSI:(NSString*) uuid {
