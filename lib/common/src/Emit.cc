@@ -273,12 +273,13 @@ void Emit::Write(const std::string& uuid, const std::string& serviceUuid,
 }
 
 void Emit::Notify(const std::string& uuid, const std::string& serviceUuid,
-                  const std::string& characteristicUuid, bool state, const std::string& error)
+                  const std::string& characteristicUuid, bool state, const std::string& error,
+                  const std::string& errorDomain, int errorCode)
 {
-    mCallback->call([uuid, serviceUuid, characteristicUuid, state, error](Napi::Env env,
+    mCallback->call([uuid, serviceUuid, characteristicUuid, state, error, errorDomain, errorCode](Napi::Env env,
                                                                    std::vector<napi_value>& args) {
         // emit('notify', deviceUuid, servicesUuid, characteristicsUuid, state)
-        args = { _s("notify"), _u(uuid), _u(serviceUuid), _u(characteristicUuid), _b(state), error.empty() ? env.Null() : _e(error) };
+        args = { _s("notify"), _u(uuid), _u(serviceUuid), _u(characteristicUuid), _b(state), error.empty() ? env.Null() : toNativeError(env, error, errorDomain, errorCode) };
     });
 }
 

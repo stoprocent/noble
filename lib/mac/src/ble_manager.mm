@@ -393,7 +393,8 @@ NativeErrorDetails getNativeErrorDetails(NSError *error, const std::string& fall
     std::string uuid = getUuid(peripheral);
     std::string serviceUuid = [characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [characteristic.UUID.UUIDString UTF8String];
-    emit.Notify(uuid, serviceUuid, characteristicUuid, characteristic.isNotifying, error ? error.localizedDescription.UTF8String : "");
+    const auto details = getNativeErrorDetails(error, "");
+    emit.Notify(uuid, serviceUuid, characteristicUuid, characteristic.isNotifying, details.message, details.domain, details.code);
 }
 
 #pragma mark - Descriptors
