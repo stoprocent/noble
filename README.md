@@ -301,7 +301,7 @@ const nobleCustom = withBindings('hci', {
 // discovery, read, write, notify/indicate. Does not support raw HCI handle
 // I/O, custom scan parameters, or vendor-specific commands.
 const nobleDbus = withBindings('dbus', {
-  adapterId: 'hci0' // optional; defaults to the first BlueZ adapter
+  adapterId: 'hci0' // optional; defaults to hci<NOBLE_HCI_DEVICE_ID>, else the first BlueZ adapter
 });
 
 // Equivalent to withBindings('dbus') without code changes:
@@ -756,7 +756,7 @@ The following environment variables can configure noble's behavior:
 
 | Variable | Purpose | Default | Example |
 |----------|---------|---------|---------|
-| NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
+| NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use (HCI socket and D-Bus bindings) | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
 | HCI_CHANNEL_USER | Use the exclusive Linux HCI user channel | false | `export HCI_CHANNEL_USER=1` |
 | NOBLE_CODED_PHY | Offer LE Coded PHY for connections (long range, lower throughput; requires controller support) | false | `export NOBLE_CODED_PHY=1` |
 | NOBLE_REPORT_ALL_HCI_EVENTS | Report HCI events without waiting for scan response | false | `export NOBLE_REPORT_ALL_HCI_EVENTS=1` |
