@@ -233,7 +233,9 @@ describe('dbus/bindings', () => {
 
     test('ignores an empty NOBLE_HCI_DEVICE_ID', async () => {
       process.env.NOBLE_HCI_DEVICE_ID = '';
-      expect(await startedAddress()).toBe('00:11:22:33:44:55');
+      const warnings = [];
+      expect(await startedAddress(undefined, warnings)).toBe('00:11:22:33:44:55');
+      expect(warnings).toEqual([]);
     });
 
     test('prefers the hciDeviceId and adapterId options over NOBLE_HCI_DEVICE_ID', async () => {
