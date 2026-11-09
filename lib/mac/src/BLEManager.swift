@@ -83,7 +83,10 @@ final class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     /// cycles, so the state is also polled.
     private func startStateTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + .seconds(2), repeating: .seconds(2), leeway: .milliseconds(100))
+        let interval = DispatchTimeInterval.seconds(2)
+        timer.schedule(
+            deadline: DispatchTime.now() + interval, repeating: interval,
+            leeway: DispatchTimeInterval.milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self = self, !self.isShutDown, let central = self.central else {
                 return
@@ -380,7 +383,12 @@ final class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             let message = "Bluetooth adapter is \(stateName(state))"
             for session in Array(sessions.values) {
                 rejectAll(session, message)
-                if !session.isConnected {
+                if session.isConnected {
+                    // The link is gone, and no didDisconnect follows. The session
+                    // is kept so the stale link can be dropped once the radio is back.
+                    session.isConnected = false
+                    js.disconnected(session.id, reason: message)
+                } else {
                     session.peripheral.delegate = nil
                     sessions.removeValue(forKey: session.id)
                 }
