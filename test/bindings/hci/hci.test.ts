@@ -3209,4 +3209,130 @@ describe('hci-socket hci', () => {
     expect(delegate.onStateChange).toHaveBeenCalledTimes(1);
     expect(delegate.onStateChange).toHaveBeenCalledWith('newState');
   });
+
+  it('should clear ACL bookkeeping before reporting a power-off from poweredOn', () => {
+    hci.state = 'poweredOn';
+    hci.aclConnections.set(4404, { pending: 1 });
+    hci.aclQueue.push({ handle: 4404, packet: Buffer.from([0x02]) });
+    hci.pendingLeConn = { address: '11:22:33:44:55:66', addressType: 'random' };
+
+    let connectionsSeenByDelegate;
+    delegate.onStateChange = jest.fn(() => {
+      connectionsSeenByDelegate = hci.aclConnections.size;
+    });
+
+    hci.setState('poweredOff');
+
+    expect(connectionsSeenByDelegate).toBe(0);
+    expect(hci.aclQueue).toHaveLength(0);
+    expect(hci.pendingLeConn).toBeNull();
+    expect(hci.state).toBe('poweredOff');
+  });
+
+  describe('after-reset callbacks', () => {
+    it('should run a callback only for the first reset that follows it', () => {
+      hci.createLeConnAfterReset = jest.fn();
+
+      hci.createLeConn('aa:bb:cc:dd:ee:ff', 'random', {}, true);
+      expect(hci.createLeConnAfterReset).not.toHaveBeenCalled();
+
+      hci.processCmdCompleteEvent(RESET_CMD, 0, Buffer.alloc(0));
+      hci.processCmdCompleteEvent(RESET_CMD, 0, Buffer.alloc(0));
+
+      expect(hci.createLeConnAfterReset).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not run a callback registered while the callbacks are being drained until the next reset', () => {
+      const late = jest.fn();
+      const early = jest.fn(() => {
+        hci.afterResetCallbacks.push(late);
+      });
+      hci.afterResetCallbacks.push(early);
+
+      hci.processCmdCompleteEvent(RESET_CMD, 0, Buffer.alloc(0));
+      expect(early).toHaveBeenCalledTimes(1);
+      expect(late).not.toHaveBeenCalled();
+
+      hci.processCmdCompleteEvent(RESET_CMD, 0, Buffer.alloc(0));
+      expect(early).toHaveBeenCalledTimes(1);
+      expect(late).toHaveBeenCalledTimes(1);
+    });
+
+    it('should connect without a reset when asked to', () => {
+      hci.createLeConnAfterReset = jest.fn();
+      const attemptToken = {};
+
+      hci.createLeConn('aa:bb:cc:dd:ee:ff', 'random', { minInterval: 6 }, false, attemptToken);
+
+      expect(hci.socket.write).not.toHaveBeenCalled();
+      expect(hci.createLeConnAfterReset).toHaveBeenCalledWith('aa:bb:cc:dd:ee:ff', 'random', { minInterval: 6 }, attemptToken);
+    });
+  });
+
+  describe('delegate', () => {
+    it('should tolerate a delegate without the informational methods', () => {
+      delete delegate.onLeFeatures;
+      delete delegate.onLeDataLengthChange;
+      delete delegate.onReadLocalVersion;
+
+      expect(() => {
+        hci.processCmdCompleteEvent(8195, 0, Buffer.alloc(8));
+        hci.processCmdCompleteEvent(4097, 0, Buffer.from([9, 1, 2, 3, 4, 5, 6, 7]));
+        hci.processLeMetaEvent(0x07, 0x40, Buffer.from([0x01, 0xfb, 0x00, 0x48, 0x08, 0xfb, 0x00, 0x48, 0x08]));
+      }).not.toThrow();
+    });
+
+    it('should report the LE features to the delegate', () => {
+      const features = Buffer.from([0x20, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+      hci.processCmdCompleteEvent(8195, 0, features);
+
+      expect(delegate.onLeFeatures).toHaveBeenCalledTimes(1);
+      expect(delegate.onLeFeatures).toHaveBeenCalledWith(features);
+    });
+
+    it('should carry the attempt token of a matching successful connection and consume the attempt', () => {
+      const attemptToken = {};
+      hci.createLeConnAfterReset('FF:EE:DD:CC:BB:AA', 'random', {}, attemptToken);
+
+      hci.processLeConnComplete(0, Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]));
+
+      expect(delegate.onLeConnComplete).toHaveBeenCalledTimes(1);
+      expect(delegate.onLeConnComplete.mock.calls[0][0].attemptToken).toBe(attemptToken);
+      expect(hci.pendingLeConn).toBeNull();
+    });
+
+    it('should not attribute a connection from another address to the pending attempt', () => {
+      const attemptToken = {};
+      hci.createLeConnAfterReset('11:22:33:44:55:66', 'random', {}, attemptToken);
+
+      hci.processLeConnComplete(0, Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9]));
+
+      expect(delegate.onLeConnComplete).toHaveBeenCalledTimes(1);
+      expect(delegate.onLeConnComplete.mock.calls[0][0]).not.toHaveProperty('attemptToken');
+      expect(hci.pendingLeConn).not.toBeNull();
+    });
+
+    it('should match the pending attempt against the peer resolvable private address of an enhanced completion', () => {
+      const attemptToken = {};
+      hci.createLeConnAfterReset('0e:0d:0c:0b:0a:09', 'random', {}, attemptToken);
+
+      hci.processLeEnhancedConnComplete(0, Buffer.from([0x34, 0x11, 4, 1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 2, 1, 4, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]));
+
+      expect(delegate.onLeConnComplete.mock.calls[0][0].attemptToken).toBe(attemptToken);
+      expect(hci.pendingLeConn).toBeNull();
+    });
+
+    it('should report a failed Command Status with only the status when no attempt is pending', () => {
+      hci.processCmdStatusEvent(8205, 0x0c);
+
+      expect(delegate.onLeConnComplete.mock.calls).toStrictEqual([[{ status: 0x0c }]]);
+    });
+  });
+
+  it('should expose the HCI status table', () => {
+    expect(HCI_STATUS[0]).toBe('Success');
+    expect(HCI_STATUS[0x3e]).toBe(require('../../../src/bindings/hci/hci-status.json')[0x3e]);
+    expect(HCI_STATUS[0xffff]).toBeUndefined();
+  });
 });

@@ -1104,4 +1104,144 @@ describe('hci-socket gap', () => {
 
     expect(delegate.onDiscover).toHaveBeenCalledTimes(1);
   });
+
+  describe('onHciLeExtendedAdvertisingReport', () => {
+    const status = 0;
+    const address = 'a:d:d:r:e:s:s';
+    const addressType = 'random';
+    const rssi = -60;
+    const txpower = 4;
+    const eir = Buffer.alloc(0);
+    const emptyAdvertisement = {
+      localName: undefined,
+      txPowerLevel: txpower,
+      manufacturerData: undefined,
+      serviceData: [],
+      serviceUuids: [],
+      serviceSolicitationUuids: []
+    };
+
+    const createGap = () => {
+      const delegate = createDelegate();
+      const gap = new Gap({} as any, delegate) as any;
+      return { gap, delegate };
+    };
+
+    it('connectable and scannable advertisement waits for more data', () => {
+      const { gap, delegate } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x13, address, addressType, txpower, rssi, eir });
+
+      expect(gap.discoveries.get(address)).toStrictEqual({
+        address,
+        addressType,
+        connectable: true,
+        advertisement: emptyAdvertisement,
+        rssi,
+        count: 1,
+        hasScanResponse: false
+      });
+      expect(delegate.onDiscover).not.toHaveBeenCalled();
+    });
+
+    it('reports the second advertisement without a scan response, with booleans', () => {
+      const { gap, delegate } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x13, address, addressType, txpower, rssi, eir });
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x13, address, addressType, txpower, rssi, eir });
+
+      expect(delegate.onDiscover).toHaveBeenCalledTimes(1);
+      expect(delegate.onDiscover).toHaveBeenCalledWith({
+        status,
+        address,
+        addressType,
+        connectable: true,
+        scannable: true,
+        advertisement: emptyAdvertisement,
+        rssi
+      });
+    });
+
+    it('non-connectable advertisement is reported right away', () => {
+      const { gap, delegate } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x10, address, addressType, txpower, rssi, eir });
+
+      expect(delegate.onDiscover).toHaveBeenCalledTimes(1);
+      expect(delegate.onDiscover).toHaveBeenCalledWith({
+        status,
+        address,
+        addressType,
+        connectable: false,
+        scannable: false,
+        advertisement: emptyAdvertisement,
+        rssi
+      });
+    });
+
+    it('incomplete non-connectable advertisement is held back', () => {
+      const { gap, delegate } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x20, address, addressType, txpower, rssi, eir });
+
+      expect(delegate.onDiscover).not.toHaveBeenCalled();
+    });
+
+    it('scan response keeps the connectable flag of the advertisement and merges its data', () => {
+      const { gap, delegate } = createGap();
+      const name = Buffer.from('abc');
+      const scanResponse = Buffer.concat([Buffer.from([name.length + 1, 0x09]), name]);
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x13, address, addressType, txpower, rssi, eir });
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x1a, address, addressType, txpower: 9, rssi: -50, eir: scanResponse });
+
+      expect(gap.discoveries.get(address)).toStrictEqual({
+        address,
+        addressType,
+        connectable: true,
+        advertisement: { ...emptyAdvertisement, localName: 'abc' },
+        rssi: -50,
+        count: 2,
+        hasScanResponse: true
+      });
+      expect(delegate.onDiscover).toHaveBeenCalledTimes(1);
+      expect(delegate.onDiscover).toHaveBeenCalledWith({
+        status,
+        address,
+        addressType,
+        connectable: true,
+        scannable: true,
+        advertisement: { ...emptyAdvertisement, localName: 'abc' },
+        rssi: -50
+      });
+    });
+
+    it('scan response of an unknown address takes its flags from its own event type', () => {
+      const { gap, delegate } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x1b, address, addressType, txpower, rssi, eir });
+
+      expect(delegate.onDiscover).toHaveBeenCalledTimes(1);
+      expect(delegate.onDiscover.mock.calls[0][0].connectable).toBe(true);
+      expect(delegate.onDiscover.mock.calls[0][0].scannable).toBe(true);
+    });
+
+    it('a tx power level in the data wins over the one of the report', () => {
+      const { gap } = createGap();
+
+      gap.onHciLeExtendedAdvertisingReport({ status, type: 0x10, address, addressType, txpower, rssi, eir: Buffer.from([0x02, 0x0a, 0xfc]) });
+
+      expect(gap.discoveries.get(address).advertisement.txPowerLevel).toBe(-4);
+    });
+  });
+
+  it('truncated service data is ignored', () => {
+    const delegate = createDelegate();
+    const gap = new Gap({} as any, delegate) as any;
+
+    // 32-bit service data that only carries two uuid bytes
+    const advertisement = gap.parseServices('a:d:d:r:e:s:s', Buffer.from([0x03, 0x20, 0x01, 0x02]), false);
+
+    expect(advertisement.serviceData).toEqual([]);
+  });
 });
