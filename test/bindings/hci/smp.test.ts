@@ -76,7 +76,8 @@ describe('hci smp', () => {
       'handlePairingRandom',
       'handlePairingFailed',
       'handleEncryptInfo',
-      'handleMasterIdent'
+      'handleMasterIdent',
+      'handleSecurityRequest'
     ];
 
     beforeEach(() => {
@@ -89,7 +90,7 @@ describe('hci smp', () => {
       handlers.forEach((name) => {
         if (name === called) {
           expect(smp[name]).toHaveBeenCalledTimes(1);
-          if (name !== 'handlePairingFailed') {
+          if (name !== 'handlePairingFailed' && name !== 'handleSecurityRequest') {
             expect(smp[name]).toHaveBeenCalledWith(data);
           }
         } else {
@@ -104,7 +105,8 @@ describe('hci smp', () => {
       [0x04, 'handlePairingRandom'],
       [0x05, 'handlePairingFailed'],
       [0x06, 'handleEncryptInfo'],
-      [0x07, 'handleMasterIdent']
+      [0x07, 'handleMasterIdent'],
+      [0x0b, 'handleSecurityRequest']
     ])('code 0x%s should call %s', (code, handler) => {
       const data = Buffer.from([code, 0x33, 0x44]);
       push(data);
@@ -116,6 +118,62 @@ describe('hci smp', () => {
       push(Buffer.from([0x08, 0x33, 0x44]));
 
       expectOnly(null);
+    });
+  });
+
+  describe('security request (Core Spec Vol 3 Part H 3.6.7)', () => {
+    test('is answered with pairing failed, pairing not supported', () => {
+      push(Buffer.from([0x0b, 0x01]));
+
+      expect(aclStream.write).toHaveBeenCalledTimes(1);
+      expect(aclStream.write).toHaveBeenCalledWith(6, Buffer.from([0x05, 0x05]));
+    });
+
+    test('is not reported as a pairing failure', () => {
+      push(Buffer.from([0x0b, 0x01]));
+
+      expect(delegate.onFail).not.toHaveBeenCalled();
+      expect(delegate.onStk).not.toHaveBeenCalled();
+    });
+
+    test('is answered whatever the requested authentication, also when it is missing', () => {
+      push(Buffer.from([0x0b, 0x0d]));
+      push(Buffer.from([0x0b]));
+
+      expect(aclStream.write.mock.calls).toEqual([
+        [6, Buffer.from([0x05, 0x05])],
+        [6, Buffer.from([0x05, 0x05])]
+      ]);
+    });
+
+    test('is answered every time it is repeated', () => {
+      push(Buffer.from([0x0b, 0x01]));
+      push(Buffer.from([0x0b, 0x01]));
+
+      expect(aclStream.write).toHaveBeenCalledTimes(2);
+    });
+
+    test('is ignored once our own pairing request is out, so the pairing is not aborted', () => {
+      smp.sendPairingRequest();
+      aclStream.write.mockClear();
+
+      push(Buffer.from([0x0b, 0x01]));
+
+      expect(aclStream.write).not.toHaveBeenCalled();
+      expect(delegate.onFail).not.toHaveBeenCalled();
+    });
+
+    test('is answered again after our own pairing failed', () => {
+      smp.sendPairingRequest();
+      push(Buffer.from([0x05, 0x03]));
+      aclStream.write.mockClear();
+      delegate.onFail.mockClear();
+
+      push(Buffer.from([0x0b, 0x01]));
+
+      expect(aclStream.write).toHaveBeenCalledTimes(1);
+      expect(aclStream.write).toHaveBeenCalledWith(6, Buffer.from([0x05, 0x05]));
+      expect(delegate.onFail).not.toHaveBeenCalled();
     });
   });
 

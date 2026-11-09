@@ -67,6 +67,11 @@ const GATT_SERVER_CHARAC_CFG_UUID = 0x2903;
 
 const ATT_CID = 0x0004;
 
+// Core Spec Vol 3 Part F 3.2.8: ATT_MTU ranges from the 23 octet default to 517.
+const ATT_MIN_MTU = 23;
+const ATT_MAX_MTU = 517;
+const ATT_DEFAULT_REQUEST_MTU = 256;
+
 const CHARACTERISTIC_PROPERTIES: ReadonlyArray<readonly [number, CharacteristicProperty]> = [
   [0x01, 'broadcast'],
   [0x02, 'read'],
@@ -79,6 +84,25 @@ const CHARACTERISTIC_PROPERTIES: ReadonlyArray<readonly [number, CharacteristicP
 ];
 
 const hex = (value: number, width: number): string => `0x${value.toString(16).padStart(width, '0')}`;
+
+/**
+ * The client RX MTU to put into the exchange. The value comes from the
+ * caller's connect options and ends up in a 16-bit field of the request, so
+ * anything that is not an integer in the ATT range is replaced by the default
+ * here, once, instead of throwing (or going out) on the connect path.
+ */
+function requestableMtu (desiredMtu: unknown): number {
+  if (desiredMtu === undefined || desiredMtu === null) {
+    return ATT_DEFAULT_REQUEST_MTU;
+  }
+
+  if (typeof desiredMtu !== 'number' || !Number.isInteger(desiredMtu) || desiredMtu < ATT_MIN_MTU || desiredMtu > ATT_MAX_MTU) {
+    debug(`ignoring unusable desired mtu ${String(desiredMtu)}, requesting ${ATT_DEFAULT_REQUEST_MTU}`);
+    return ATT_DEFAULT_REQUEST_MTU;
+  }
+
+  return desiredMtu;
+}
 
 /** The peer answered a request with an ATT Error Response. */
 export class AttError extends NobleError {
@@ -147,7 +171,7 @@ export class Gatt {
   private currentCommand: Command | null = null;
   private commandQueue: Command[] = [];
 
-  private currentMtu = 23;
+  private currentMtu = ATT_MIN_MTU;
   private readonly desiredMtu: number;
   private security: 'low' | 'medium' = 'low';
   private encrypting = false;
@@ -159,7 +183,7 @@ export class Gatt {
     private readonly delegate: GattDelegate,
     desiredMtu?: number
   ) {
-    this.desiredMtu = desiredMtu || 256;
+    this.desiredMtu = requestableMtu(desiredMtu);
 
     this.aclStream.registerChannel(ATT_CID, (data) => this.onAclStreamData(data));
   }
@@ -197,7 +221,9 @@ export class Gatt {
     const opcode = data[0];
 
     if (opcode === ATT_OP_MTU_RESP) {
-      const newMtu = data.readUInt16LE(1);
+      // Core Spec Vol 3 Part F 3.4.2.2: the response carries the peer's own RX MTU,
+      // so ATT_MTU is the smaller of the two.
+      const newMtu = Math.min(this.desiredMtu, data.readUInt16LE(1));
 
       debug(`${this.address}: new MTU is ${newMtu}`);
 

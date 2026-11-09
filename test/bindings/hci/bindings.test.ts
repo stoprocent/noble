@@ -36,6 +36,7 @@ jest.mock('../../../src/bindings/hci/gap', () => {
     setScanParameters = jest.fn();
     startScanning = jest.fn();
     stopScanning = jest.fn();
+    reset = jest.fn();
     onHciLeScanParametersSet = jest.fn();
     onHciLeScanEnableSet = jest.fn();
     onLeScanEnableSetCmd = jest.fn();
@@ -1021,6 +1022,165 @@ describe('hci-socket bindings', () => {
       expect(hci.createLeConn).not.toHaveBeenCalled();
       expect(bindings.connectionQueue).toHaveLength(0);
       await expect(retry).rejects.toBeInstanceOf(AdapterStateError);
+    });
+  });
+
+  describe('adapter power cycle while scanning (issue #143)', () => {
+    /** A scan that the controller confirmed. */
+    const liveScan = async () => {
+      const started = bindings.startScanning(['uuid'], false);
+      bindings.onScanStart(true);
+      await started;
+      gap.startScanning.mockClear();
+      delegate.onScanStart.mockClear();
+    };
+
+    beforeEach(() => {
+      bindings.onStateChange('poweredOn');
+      delegate.onStateChange.mockClear();
+    });
+
+    it('resets the scan state of the bindings and the gap when the adapter leaves poweredOn', async () => {
+      await liveScan();
+
+      bindings.onStateChange('poweredOff');
+
+      expect(bindings.isScanning).toBe(false);
+      expect(bindings.isScanningStarted).toBe(false);
+      expect(gap.reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports the scan stop before the state change', async () => {
+      await liveScan();
+      const order: string[] = [];
+      delegate.onScanStop.mockImplementation(() => order.push('scanStop'));
+      delegate.onStateChange.mockImplementation((state: string) => order.push(state));
+
+      bindings.onStateChange('poweredOff');
+
+      expect(order).toEqual(['scanStop', 'poweredOff']);
+    });
+
+    it.each(['poweredOff', 'resetting', 'unauthorized', 'unsupported', 'unknown'])('also when the adapter goes to %s', async (state) => {
+      await liveScan();
+
+      bindings.onStateChange(state);
+
+      expect(bindings.isScanning).toBe(false);
+      expect(delegate.onScanStop).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not report a scan stop when nothing was scanning, but still resets the gap', () => {
+      bindings.onStateChange('poweredOff');
+
+      expect(delegate.onScanStop).not.toHaveBeenCalled();
+      expect(gap.reset).toHaveBeenCalledTimes(1);
+      expect(delegate.onStateChange).toHaveBeenCalledWith('poweredOff');
+    });
+
+    it('rejects a start that was still in flight with AdapterStateError and reports the stop', async () => {
+      const first = bindings.startScanning(['uuid'], false);
+      const joined = bindings.startScanning(['uuid'], false);
+
+      bindings.onStateChange('poweredOff');
+
+      await expect(first).rejects.toBeInstanceOf(AdapterStateError);
+      await expect(joined).rejects.toMatchObject({ state: 'poweredOff' });
+      expect(delegate.onScanStop).toHaveBeenCalledTimes(1);
+      expect(bindings.isScanningStarted).toBe(false);
+      expect(bindings.scanStartWaiters).toEqual([]);
+    });
+
+    it('resolves a stop that was still in flight: scanning has in fact stopped', async () => {
+      await liveScan();
+      const stopping = bindings.stopScanning();
+      expect(await stateOf(stopping)).toBe('pending');
+
+      bindings.onStateChange('poweredOff');
+
+      await expect(stopping).resolves.toBeUndefined();
+      expect(delegate.onScanStop).toHaveBeenCalledTimes(1);
+      expect(bindings.scanStopWaiters).toEqual([]);
+    });
+
+    it('rejects a pending setScanParameters with AdapterStateError', async () => {
+      const promise = bindings.setScanParameters(1, 2);
+
+      bindings.onStateChange('poweredOff');
+
+      await expect(promise).rejects.toBeInstanceOf(AdapterStateError);
+    });
+
+    it('does not start connecting from the scan reset', async () => {
+      await liveScan();
+      const connecting = bindings.connect('112233445566', { addressType: 'public' });
+      // the connect is parked behind the scan stop
+      expect(gap.stopScanning).toHaveBeenCalledTimes(1);
+
+      bindings.onStateChange('poweredOff');
+
+      await expect(connecting).rejects.toBeInstanceOf(AdapterStateError);
+      expect(hci.createLeConn).not.toHaveBeenCalled();
+    });
+
+    it('poweredOn -> poweredOff -> poweredOn: startScanning drives the controller again', async () => {
+      await liveScan();
+
+      bindings.onStateChange('poweredOff');
+      bindings.onStateChange('poweredOn');
+
+      const restarted = bindings.startScanning(['other'], true);
+
+      // not short-circuited on a stale flag: no scanStart of our own making, a real start
+      expect(delegate.onScanStart).not.toHaveBeenCalled();
+      expect(gap.startScanning).toHaveBeenCalledTimes(1);
+      expect(gap.startScanning).toHaveBeenCalledWith(true);
+      expect(bindings.scanServiceUuids).toEqual(['other']);
+      expect(await stateOf(restarted)).toBe('pending');
+
+      bindings.onScanStart(false);
+
+      await expect(restarted).resolves.toBeUndefined();
+      expect(bindings.isScanning).toBe(true);
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('poweredOn -> poweredOff -> poweredOn with a start in flight: the next start is not joined to the dead one', async () => {
+      const dead = bindings.startScanning(['uuid'], false);
+      bindings.onStateChange('poweredOff');
+      await expect(dead).rejects.toBeInstanceOf(AdapterStateError);
+      gap.startScanning.mockClear();
+
+      bindings.onStateChange('poweredOn');
+      const restarted = bindings.startScanning(['uuid'], false);
+
+      expect(gap.startScanning).toHaveBeenCalledTimes(1);
+      bindings.onScanStart(true);
+      await expect(restarted).resolves.toBeUndefined();
+    });
+
+    it('poweredOn -> poweredOff -> poweredOn: a connect does not wait for a scan stop that cannot come', async () => {
+      await liveScan();
+
+      bindings.onStateChange('poweredOff');
+      bindings.onStateChange('poweredOn');
+      gap.stopScanning.mockClear();
+
+      bindings.connect('112233445566', { addressType: 'public' });
+
+      expect(gap.stopScanning).not.toHaveBeenCalled();
+      expect(hci.createLeConn).toHaveBeenCalledTimes(1);
+      expect(hci.createLeConn).toHaveBeenCalledWith('11:22:33:44:55:66', 'public', { addressType: 'public' }, true, expect.anything());
+    });
+
+    it('a second power cycle without a scan in between reports no further scan stop', async () => {
+      await liveScan();
+
+      bindings.onStateChange('poweredOff');
+      bindings.onStateChange('poweredOn');
+      bindings.onStateChange('poweredOff');
+
+      expect(delegate.onScanStop).toHaveBeenCalledTimes(1);
     });
   });
 

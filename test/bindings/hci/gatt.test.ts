@@ -722,10 +722,80 @@ describe('hci gatt', () => {
       gatt.currentMtu = 22;
       const promise = gatt.exchangeMtu();
 
+      // 0x3312 is larger than the requested 256, so ATT_MTU is the requested value.
       push([0x03, 0x12, 0x33]);
 
-      await expect(promise).resolves.toBe(13074);
-      expect(gatt.mtu).toBe(13074);
+      await expect(promise).resolves.toBe(256);
+      expect(gatt.mtu).toBe(256);
+    });
+
+    it('keeps the peer mtu when it is the smaller one', async () => {
+      const promise = gatt.exchangeMtu();
+
+      // 247, the value a peripheral typically answers to a 256 request.
+      push([0x03, 0xf7, 0x00]);
+
+      await expect(promise).resolves.toBe(247);
+      expect(gatt.mtu).toBe(247);
+    });
+
+    it('does not let a peer raise the mtu above the requested one', async () => {
+      const requesting: any = new Gatt(address, aclStream, delegate, 23);
+      const pushRequesting = aclStream.registerChannel.mock.calls[aclStream.registerChannel.mock.calls.length - 1][1];
+      const promise = requesting.exchangeMtu();
+
+      expect(written()).toEqual([Buffer.from([0x02, 0x17, 0x00])]);
+
+      pushRequesting(Buffer.from([0x03, 0xf7, 0x00]));
+
+      await expect(promise).resolves.toBe(23);
+      expect(requesting.mtu).toBe(23);
+    });
+  });
+
+  describe('desired mtu validation', () => {
+    const withMtu = (mtu?: unknown): any => new Gatt(address, aclStream, delegate, mtu as number | undefined);
+
+    it('defaults when no mtu is requested', () => {
+      expect(withMtu().desiredMtu).toBe(256);
+      expect(withMtu(null).desiredMtu).toBe(256);
+    });
+
+    it('keeps a usable requested mtu', () => {
+      expect(withMtu(23).desiredMtu).toBe(23);
+      expect(withMtu(517).desiredMtu).toBe(517);
+    });
+
+    it('falls back to the default for values the peer could never be asked for', () => {
+      for (const unusable of [22, 518, 0, -1, 70000, 1.5, 'abc', '100', NaN, Infinity, {}, true]) {
+        expect(withMtu(unusable).desiredMtu).toBe(256);
+      }
+    });
+
+    it('builds a valid request buffer for every accepted mtu', () => {
+      for (const mtu of [23, 256, 517, -1, 70000, 'abc']) {
+        const built = withMtu(mtu);
+        expect(() => built.mtuRequest(built.desiredMtu)).not.toThrow();
+      }
+    });
+
+    it('never throws from exchangeMtu or puts an unusable mtu on the wire', () => {
+      for (const mtu of [-1, 70000, 1.5, 'abc']) {
+        aclStream.write.mockClear();
+        const built = withMtu(mtu);
+
+        expect(() => { track(built.exchangeMtu()); }).not.toThrow();
+        expect(written()).toEqual([Buffer.from([0x02, 0x00, 0x01])]);
+      }
+    });
+
+    it('answers a peer MTU request with the validated mtu', () => {
+      withMtu(70000);
+      const pushBuilt = aclStream.registerChannel.mock.calls[aclStream.registerChannel.mock.calls.length - 1][1];
+      aclStream.write.mockClear();
+
+      expect(() => pushBuilt(Buffer.from([0x02, 0x17, 0x00]))).not.toThrow();
+      expect(written()).toEqual([Buffer.from([0x03, 0x00, 0x01])]);
     });
   });
 

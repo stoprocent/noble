@@ -254,9 +254,18 @@ function callsTo (method: string) {
 // ---- Tests ----
 
 describe('dbus/bindings', () => {
+  const envDeviceId = process.env.NOBLE_HCI_DEVICE_ID;
+
   beforeEach(() => {
+    // Adapter selection reads it; keep the suite independent of the shell.
+    delete process.env.NOBLE_HCI_DEVICE_ID;
     resetState(adapterTree());
     mockBus.disconnect.mockClear();
+  });
+
+  afterAll(() => {
+    if (envDeviceId === undefined) delete process.env.NOBLE_HCI_DEVICE_ID;
+    else process.env.NOBLE_HCI_DEVICE_ID = envDeviceId;
   });
 
   describe('start / adapter state', () => {
@@ -313,10 +322,65 @@ describe('dbus/bindings', () => {
       expect(delegate.onAddressChange).toHaveBeenCalledWith('66:77:88:99:AA:BB');
     });
 
-    test('falls back to the first adapter when the requested one does not exist', async () => {
+    test('falls back to the first adapter, with a warning, when the requested one does not exist', async () => {
       const { delegate } = await startBindings({ adapterId: 'hci7' });
 
       expect(delegate.onAddressChange).toHaveBeenCalledWith('00:11:22:33:44:55');
+      expect(delegate.onWarning.mock.calls).toEqual([['BlueZ adapter hci7 not found, using /org/bluez/hci0']]);
+    });
+
+    describe('adapter selection', () => {
+      const twoAdapters = () => adapterTree({
+        '/org/bluez/hci1': {
+          'org.bluez.Adapter1': { Address: '66:77:88:99:AA:BB', Powered: true, Discovering: false }
+        }
+      });
+
+      async function startedAddress (options?: any, warnings: string[] = []) {
+        const { delegate } = await startBindings(options);
+        warnings.push(...delegate.onWarning.mock.calls.map(([message]: [string]) => message));
+        return delegate.onAddressChange.mock.calls.at(-1)?.[0];
+      }
+
+      beforeEach(() => {
+        resetState(twoAdapters());
+      });
+
+      afterEach(() => {
+        delete process.env.NOBLE_HCI_DEVICE_ID;
+      });
+
+      test('uses the first adapter by default', async () => {
+        expect(await startedAddress()).toBe('00:11:22:33:44:55');
+      });
+
+      test('uses the adapter named by NOBLE_HCI_DEVICE_ID', async () => {
+        process.env.NOBLE_HCI_DEVICE_ID = '1';
+        const warnings: string[] = [];
+        expect(await startedAddress(undefined, warnings)).toBe('66:77:88:99:AA:BB');
+        expect(warnings).toEqual([]);
+      });
+
+      test('warns and uses the first adapter when the requested one does not exist', async () => {
+        process.env.NOBLE_HCI_DEVICE_ID = '3';
+        const warnings: string[] = [];
+        expect(await startedAddress(undefined, warnings)).toBe('00:11:22:33:44:55');
+        expect(warnings.some(w => /adapter hci3 not found/.test(w))).toBe(true);
+      });
+
+      test('ignores an empty NOBLE_HCI_DEVICE_ID', async () => {
+        process.env.NOBLE_HCI_DEVICE_ID = '';
+        const warnings: string[] = [];
+        expect(await startedAddress(undefined, warnings)).toBe('00:11:22:33:44:55');
+        expect(warnings).toEqual([]);
+      });
+
+      test('prefers the hciDeviceId and adapterId options over NOBLE_HCI_DEVICE_ID', async () => {
+        process.env.NOBLE_HCI_DEVICE_ID = '1';
+        expect(await startedAddress({ hciDeviceId: 0 })).toBe('00:11:22:33:44:55');
+        resetState(twoAdapters());
+        expect(await startedAddress({ adapterId: 'hci0' })).toBe('00:11:22:33:44:55');
+      });
     });
 
     test('devices already in the BlueZ cache are reported on start', async () => {
@@ -816,6 +880,34 @@ describe('dbus/bindings', () => {
       await expect(retry).resolves.toBeUndefined();
     });
 
+    test('warns that the mtu connect option cannot be honoured, and connects normally', async () => {
+      resetState(deviceTree());
+      const { bindings, delegate } = await startBindings();
+
+      const outcome = track(bindings.connect(ID, { mtu: 23 }));
+      await flush();
+
+      expect(delegate.onWarning.mock.calls).toEqual([
+        ['the mtu connect option is not supported on the dbus backend (BlueZ negotiates the ATT MTU)']
+      ]);
+      expect(callsTo('Connect').length).toBe(1);
+
+      emitProps(devicePath, DEVICE, { Connected: true, ServicesResolved: true });
+      await flush();
+      expect(outcome).toEqual({ settled: true, value: undefined, error: undefined });
+    });
+
+    test('stays quiet when no mtu is requested', async () => {
+      resetState(deviceTree());
+      const { bindings, delegate } = await startBindings();
+
+      bindings.connect(ID, { addressType: 'public' } as any);
+      bindings.connect(ID);
+      await flush();
+
+      expect(delegate.onWarning).not.toHaveBeenCalled();
+    });
+
     test('a remote drop mid-connect rejects connect and reports no disconnect', async () => {
       resetState(deviceTree());
       const { bindings, delegate } = await startBindings();
@@ -1005,6 +1097,319 @@ describe('dbus/bindings', () => {
       await flush();
 
       expect(outcome.error).toBeInstanceOf(DisconnectedError);
+    });
+  });
+
+  describe('discovery is paused while connecting', () => {
+    const OTHER_ID = '112233445566';
+    const otherPath = '/org/bluez/hci0/dev_11_22_33_44_55_66';
+
+    function seedDevices () {
+      resetState(adapterTree({
+        [devicePath]: {
+          [DEVICE]: { Address: 'AA:BB:CC:DD:EE:FF', AddressType: 'public', Connected: false }
+        },
+        [otherPath]: {
+          [DEVICE]: { Address: '11:22:33:44:55:66', AddressType: 'public', Connected: false }
+        }
+      }));
+    }
+
+    const adapterMethods = () => state.ifaceCalls
+      .filter((c: any) => c.iface === ADAPTER)
+      .map((c: any) => c.method);
+
+    const isScanning = (bindings: DbusBindings) => (bindings as any).isScanning;
+
+    /** Starts the backend with a scan running and the call/report logs cleared. */
+    async function startScanningBindings () {
+      const started = await startBindings();
+      await started.bindings.startScanning([], false);
+      await flush(); // let the scan-time watchers attach
+      state.ifaceCalls.length = 0;
+      started.delegate.onScanStart.mockClear();
+      return started;
+    }
+
+    // Resolves the connect the way BlueZ does: Connected + ServicesResolved.
+    function completeConnect (path: string) {
+      emitProps(path, DEVICE, { Connected: true, ServicesResolved: true });
+    }
+
+    function expectQuiet (delegate: ReturnType<typeof makeDelegate>) {
+      expect(delegate.onScanStop).not.toHaveBeenCalled();
+      expect(delegate.onScanStart).not.toHaveBeenCalled();
+      expect(delegate.onWarning).not.toHaveBeenCalled();
+      // No re-enumeration of BlueZ's cache: init + the scan itself, nothing for the resume.
+      expect(objectManager().GetManagedObjects).toHaveBeenCalledTimes(2);
+    }
+
+    beforeEach(() => {
+      seedDevices();
+    });
+
+    test('stops discovery before Connect and restarts it once the attempt succeeds', async () => {
+      const { bindings, delegate } = await startScanningBindings();
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+
+      expect(state.ifaceCalls.map((c: any) => c.method)).toEqual(['StopDiscovery', 'Connect']);
+      // The scan stays logically running, watchers included.
+      expect(isScanning(bindings)).toBe(true);
+      expect((bindings as any).scanPropsListeners.size).toBe(2);
+
+      completeConnect(devicePath);
+      await flush();
+
+      expect(outcome).toEqual({ settled: true, value: undefined, error: undefined });
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+      expect(isScanning(bindings)).toBe(true);
+      expect((bindings as any).scanPropsListeners.size).toBe(2);
+      expectQuiet(delegate);
+    });
+
+    test('restarts discovery when the attempt fails', async () => {
+      makeProxy(devicePath).getInterface(DEVICE).Connect =
+        () => Promise.reject(new Error('le-connection-abort-by-local'));
+      const { bindings, delegate } = await startScanningBindings();
+
+      await expect(bindings.connect(ID)).rejects.toThrow('le-connection-abort-by-local');
+
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+      expectQuiet(delegate);
+    });
+
+    test('does not touch discovery when no scan is running', async () => {
+      const { bindings } = await startBindings();
+      state.ifaceCalls.length = 0;
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+      completeConnect(devicePath);
+      await flush();
+
+      expect(outcome.settled).toBe(true);
+      expect(adapterMethods()).toEqual([]);
+    });
+
+    test('parallel connects stop discovery once and restart it after the last one', async () => {
+      const { bindings } = await startScanningBindings();
+
+      const first = track(bindings.connect(ID));
+      const again = track(bindings.connect(ID)); // shares the first attempt
+      const second = track(bindings.connect(OTHER_ID));
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+      expect(callsTo('Connect').length).toBe(2);
+
+      completeConnect(devicePath);
+      await flush();
+      expect(first.settled).toBe(true);
+      expect(again.settled).toBe(true);
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      completeConnect(otherPath);
+      await flush();
+      expect(second.settled).toBe(true);
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+    });
+
+    test('a parallel connect waits for the StopDiscovery of the attempt that paused discovery', async () => {
+      const { bindings } = await startScanningBindings();
+      let releaseStop: any;
+      const stopGate = new Promise<void>(resolve => { releaseStop = resolve; });
+      makeProxy('/org/bluez/hci0').getInterface(ADAPTER).StopDiscovery = () => stopGate;
+
+      bindings.connect(ID).catch(() => {});
+      bindings.connect(OTHER_ID).catch(() => {});
+      await flush();
+      expect(callsTo('Connect').length).toBe(0);
+
+      releaseStop();
+      await flush();
+      expect(callsTo('Connect').length).toBe(2);
+    });
+
+    test('an explicit stopScanning during a connect wins over the resume', async () => {
+      const { bindings, delegate } = await startScanningBindings();
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      await bindings.stopScanning();
+      expect(delegate.onScanStop).toHaveBeenCalledTimes(1);
+      completeConnect(devicePath);
+      await flush();
+
+      // No second StopDiscovery (already paused) and no resume of a scan the caller ended.
+      expect(outcome.settled).toBe(true);
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+      expect(isScanning(bindings)).toBe(false);
+    });
+
+    test('a first scan started during a connect still reaches BlueZ once the connect ends', async () => {
+      const { bindings, delegate } = await startBindings();
+      state.ifaceCalls.length = 0;
+
+      // Connect while no scan is running, so nothing is paused.
+      bindings.connect(ID);
+      await flush();
+      expect(adapterMethods()).toEqual([]);
+
+      await expect(bindings.startScanning([], false)).resolves.toBeUndefined();
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(1);
+      expect(adapterMethods()).toEqual(['SetDiscoveryFilter']);
+      expect(isScanning(bindings)).toBe(true);
+
+      completeConnect(devicePath);
+      await flush();
+
+      // Without the deferral the scan would be reported as running but never started.
+      expect(adapterMethods()).toEqual(['SetDiscoveryFilter', 'StartDiscovery']);
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(1);
+    });
+
+    test('a startScanning during a connect defers StartDiscovery to the resume', async () => {
+      const { bindings, delegate } = await startScanningBindings();
+
+      bindings.connect(ID);
+      await flush();
+      await bindings.stopScanning();
+      await expect(bindings.startScanning([], false)).resolves.toBeUndefined();
+
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(1);
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'SetDiscoveryFilter']);
+      expect(isScanning(bindings)).toBe(true);
+
+      completeConnect(devicePath);
+      await flush();
+
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'SetDiscoveryFilter', 'StartDiscovery']);
+    });
+
+    test('a scan started and stopped again during a connect is never started in BlueZ', async () => {
+      const { bindings } = await startBindings();
+      state.ifaceCalls.length = 0;
+
+      bindings.connect(ID);
+      await flush();
+      await bindings.startScanning([], false);
+      await bindings.stopScanning();
+      completeConnect(devicePath);
+      await flush();
+
+      expect(adapterMethods()).toEqual(['SetDiscoveryFilter']);
+    });
+
+    test('cancelConnect during a paused attempt rejects the connect and restores discovery', async () => {
+      makeProxy(devicePath).getInterface(DEVICE).Connect = jest.fn().mockReturnValue(new Promise(() => {}));
+      const { bindings, delegate } = await startScanningBindings();
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      bindings.cancelConnect(ID);
+      await flush();
+
+      expect(outcome.error).toBeInstanceOf(ConnectionCancelledError);
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+      expect(isScanning(bindings)).toBe(true);
+      expectQuiet(delegate);
+    });
+
+    test('cancelConnect of one attempt keeps discovery paused for the other', async () => {
+      const { bindings } = await startScanningBindings();
+
+      const first = track(bindings.connect(ID));
+      const second = track(bindings.connect(OTHER_ID));
+      await flush();
+
+      bindings.cancelConnect(ID);
+      await flush();
+      expect(first.error).toBeInstanceOf(ConnectionCancelledError);
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      completeConnect(otherPath);
+      await flush();
+      expect(second.settled).toBe(true);
+      expect(adapterMethods()).toEqual(['StopDiscovery', 'StartDiscovery']);
+    });
+
+    test('cancel, drop or stop while StopDiscovery is still in flight never issues Connect nor an unhandled rejection', async () => {
+      const unhandled: any[] = [];
+      const onUnhandled = (err: any) => unhandled.push(err);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const scenarios: Array<[(bindings: DbusBindings) => void, any, string[]]> = [
+          [bindings => bindings.cancelConnect(ID), ConnectionCancelledError, ['StopDiscovery', 'StartDiscovery']],
+          [() => emitProps(devicePath, DEVICE, { Connected: false }), DisconnectedError, ['StopDiscovery', 'StartDiscovery']],
+          [bindings => bindings.stop(), DisconnectedError, ['StopDiscovery']]
+        ];
+        for (const [interrupt, errorType, expectedAdapterCalls] of scenarios) {
+          seedDevices();
+          const { bindings, delegate } = await startScanningBindings();
+          let releaseStop: any;
+          const stopGate = new Promise<void>(resolve => { releaseStop = resolve; });
+          const adapter = makeProxy('/org/bluez/hci0').getInterface(ADAPTER);
+          adapter.StopDiscovery = () => {
+            state.ifaceCalls.push({ path: '/org/bluez/hci0', iface: ADAPTER, method: 'StopDiscovery', args: [] });
+            return stopGate;
+          };
+
+          const outcome = track(bindings.connect(ID));
+          await flush(); // parked on StopDiscovery
+          interrupt(bindings);
+          await flush();
+          expect(outcome.settled).toBe(false);
+
+          releaseStop();
+          await flush();
+
+          expect(outcome.error).toBeInstanceOf(errorType);
+          expect(callsTo('Connect').length).toBe(0);
+          expect(adapterMethods()).toEqual(expectedAdapterCalls);
+          expect(delegate.onDisconnect).not.toHaveBeenCalled();
+        }
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
+    test('stop() during a paused attempt rejects the connect and leaves discovery stopped', async () => {
+      const { bindings } = await startScanningBindings();
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+
+      bindings.stop();
+      await flush();
+
+      expect(outcome.error).toBeInstanceOf(DisconnectedError);
+      // Already stopped for the connect: no second StopDiscovery, and no restore after stop().
+      expect(adapterMethods()).toEqual(['StopDiscovery']);
+      expect(isScanning(bindings)).toBe(false);
+    });
+
+    test('warns when discovery cannot be resumed after a connect', async () => {
+      const { bindings, delegate } = await startScanningBindings();
+      makeProxy('/org/bluez/hci0').getInterface(ADAPTER).StartDiscovery =
+        () => Promise.reject(new Error('org.bluez.Error.InProgress'));
+
+      const outcome = track(bindings.connect(ID));
+      await flush();
+      completeConnect(devicePath);
+      await flush();
+
+      expect(outcome).toEqual({ settled: true, value: undefined, error: undefined });
+      expect(delegate.onWarning.mock.calls).toEqual([
+        ['could not resume discovery after connect: org.bluez.Error.InProgress']
+      ]);
     });
   });
 

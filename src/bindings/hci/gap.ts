@@ -103,6 +103,17 @@ export class Gap {
     this.hci.setScanEnabled(false, true);
   }
 
+  /**
+   * The adapter went away: forgets the scan and everything discovered so far.
+   * No command is written and nothing is reported; a completion that still
+   * arrives for a command of the forgotten scan is ignored.
+   */
+  reset (): void {
+    this.scanState = null;
+    this.scanFilterDuplicates = null;
+    this.discoveries.clear();
+  }
+
   onHciLeScanParametersSet (): void {
     this.delegate.onScanParametersSet();
   }

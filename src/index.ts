@@ -38,6 +38,7 @@ export type {
   CharacteristicProperty,
   ConnectOptions,
   DisconnectReason,
+  PairOptions,
   PeripheralState,
   ScanOptions,
   ServiceData

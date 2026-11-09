@@ -209,7 +209,8 @@ export class Peripheral {
       }
       ({ kind, protectionLevel, pin } = kindOrOptions);
     } else {
-      kind = kindOrOptions;
+      // Anything that is not a number (an array, say) fails the uint32 check below.
+      kind = kindOrOptions as DevicePairingKinds | null | undefined;
       protectionLevel = positionalProtectionLevel;
     }
 
@@ -264,7 +265,7 @@ export class Peripheral {
     if (!bindings.isPaired) {
       return false;
     }
-    return await bindings.isPaired(peripheralId) === true;
+    return bindings.isPaired(peripheralId);
   }
 
   /** Reads the RSSI of the live connection. */

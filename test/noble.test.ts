@@ -1092,6 +1092,91 @@ describe('Noble', () => {
 
       await expect(noble.pair(ID)).rejects.toThrow('pairing failed');
     });
+
+    test('options without a PIN forward kind and protection level only', async () => {
+      await noble.pair(ADDRESS, {
+        kind: DevicePairingKinds.DisplayPin,
+        protectionLevel: DevicePairingProtectionLevel.EncryptionAndAuthentication
+      });
+
+      expect(bindings.pair!.mock.calls).toEqual([
+        [ID, DevicePairingKinds.DisplayPin, DevicePairingProtectionLevel.EncryptionAndAuthentication]
+      ]);
+    });
+
+    test('a PIN is forwarded with authenticated defaults', async () => {
+      await expect(noble.pair(ID, { pin: '123456' })).resolves.toBeUndefined();
+
+      expect(bindings.pair!.mock.calls).toEqual([[
+        ID,
+        DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin | DevicePairingKinds.ConfirmPinMatch,
+        DevicePairingProtectionLevel.EncryptionAndAuthentication,
+        '123456'
+      ]]);
+    });
+
+    test('rejects an invalid PIN', async () => {
+      await expect(noble.pair(ID, { pin: 123456 as any })).rejects.toThrow(
+        new TypeError('pair() options.pin must be a non-empty string'));
+      await expect(noble.pair(ID, { pin: '' })).rejects.toBeInstanceOf(TypeError);
+      expect(bindings.pair).not.toHaveBeenCalled();
+    });
+
+    test('rejects a PIN with a protection level below EncryptionAndAuthentication', async () => {
+      await expect(noble.pair(ID, { pin: '123456', protectionLevel: DevicePairingProtectionLevel.Encryption }))
+        .rejects.toThrow('pair() with a PIN requires DevicePairingProtectionLevel.EncryptionAndAuthentication');
+      expect(bindings.pair).not.toHaveBeenCalled();
+    });
+
+    test('rejects options mixed with a positional protection level', async () => {
+      await expect((noble.pair as any)(ID, { pin: '123456' }, DevicePairingProtectionLevel.EncryptionAndAuthentication))
+        .rejects.toBeInstanceOf(TypeError);
+      expect(bindings.pair).not.toHaveBeenCalled();
+    });
+
+    test('a PIN on a platform without pairing rejects with NotSupportedError', async () => {
+      delete bindings.pair;
+
+      await expect(noble.pair(ID, { pin: '123456' })).rejects.toBeInstanceOf(NotSupportedError);
+    });
+  });
+
+  describe('isPaired', () => {
+    test('reports the pairing state from the bindings, by id', async () => {
+      bindings.isPaired!.mockResolvedValueOnce(true);
+
+      await expect(noble.isPaired(ID)).resolves.toBe(true);
+      expect(bindings.isPaired).toHaveBeenCalledWith(ID);
+    });
+
+    test('resolves the address and reports an unpaired peripheral', async () => {
+      await expect(noble.isPaired(ADDRESS)).resolves.toBe(false);
+      expect(bindings.isPaired).toHaveBeenCalledWith(ID);
+    });
+
+    test('resolves false when the bindings have no pairing state', async () => {
+      delete bindings.isPaired;
+
+      await expect(noble.isPaired(ID)).resolves.toBe(false);
+    });
+
+    test('starts the bindings', async () => {
+      await noble.isPaired(ID);
+
+      expect(bindings.start).toHaveBeenCalledTimes(1);
+    });
+
+    test('rejects when the bindings cannot map the address', async () => {
+      bindings.addressToId.mockReturnValue(null);
+
+      await expect(noble.isPaired('not an address')).rejects.toThrow('Invalid peripheral ID or Address not an address');
+    });
+
+    test('propagates a failure from the bindings', async () => {
+      bindings.isPaired!.mockRejectedValueOnce(new Error('peripheral not found'));
+
+      await expect(noble.isPaired(ID)).rejects.toThrow('peripheral not found');
+    });
   });
 
   describe('activity routed to known peripherals', () => {

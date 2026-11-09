@@ -608,6 +608,148 @@ describe('Peripheral', () => {
 
       await expect(peripheral.pair()).rejects.toThrow('pairing failed');
     });
+
+    describe('with options', () => {
+      const PIN_KINDS =
+        DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin | DevicePairingKinds.ConfirmPinMatch;
+
+      test('empty options mean the defaults, without a PIN argument', async () => {
+        await peripheral.pair({});
+        await peripheral.pair({ kind: null, protectionLevel: null });
+
+        expect(bindings.pair!.mock.calls).toEqual([
+          [ID, DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption],
+          [ID, DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption]
+        ]);
+      });
+
+      test('forwards kind and protection level', async () => {
+        await peripheral.pair({
+          kind: DevicePairingKinds.DisplayPin,
+          protectionLevel: DevicePairingProtectionLevel.EncryptionAndAuthentication
+        });
+
+        expect(bindings.pair!.mock.calls).toEqual([
+          [ID, DevicePairingKinds.DisplayPin, DevicePairingProtectionLevel.EncryptionAndAuthentication]
+        ]);
+      });
+
+      test('a PIN is forwarded, with authenticated defaults', async () => {
+        await expect(peripheral.pair({ pin: '123456' })).resolves.toBeUndefined();
+
+        expect(bindings.pair!.mock.calls).toEqual([
+          [ID, PIN_KINDS, DevicePairingProtectionLevel.EncryptionAndAuthentication, '123456']
+        ]);
+      });
+
+      test('a PIN is forwarded verbatim', async () => {
+        await peripheral.pair({ pin: ' 00ab ' });
+
+        expect(bindings.pair!.mock.calls[0][3]).toBe(' 00ab ');
+      });
+
+      test('a PIN keeps an explicit kind and the authenticated protection level', async () => {
+        await peripheral.pair({
+          pin: '0000',
+          kind: DevicePairingKinds.ProvidePin,
+          protectionLevel: DevicePairingProtectionLevel.EncryptionAndAuthentication
+        });
+
+        expect(bindings.pair!.mock.calls).toEqual([
+          [ID, DevicePairingKinds.ProvidePin, DevicePairingProtectionLevel.EncryptionAndAuthentication, '0000']
+        ]);
+      });
+
+      test.each([
+        ['a number', 123456],
+        ['null', null],
+        ['an object', { value: '123456' }],
+        ['empty', '']
+      ])('rejects a PIN that is %s', async (_label, pin) => {
+        await expect(peripheral.pair({ pin: pin as any })).rejects.toThrow(
+          new TypeError('pair() options.pin must be a non-empty string'));
+        expect(bindings.pair).not.toHaveBeenCalled();
+      });
+
+      test.each([
+        ['Default', DevicePairingProtectionLevel.Default],
+        ['None', DevicePairingProtectionLevel.None],
+        ['Encryption', DevicePairingProtectionLevel.Encryption]
+      ])('rejects a PIN combined with protection level %s', async (_label, protectionLevel) => {
+        await expect(peripheral.pair({ pin: '123456', protectionLevel })).rejects.toThrow(
+          new TypeError('pair() with a PIN requires DevicePairingProtectionLevel.EncryptionAndAuthentication'));
+        expect(bindings.pair).not.toHaveBeenCalled();
+      });
+
+      test('validates kind and protection level like the positional form', async () => {
+        await expect(peripheral.pair({ kind: -1 })).rejects.toThrow(
+          'pair() kind must be a finite uint32 DevicePairingKinds bitmask');
+        await expect(peripheral.pair({ kind: DevicePairingKinds.None, pin: '123456' })).rejects.toThrow(
+          'DevicePairingKinds.None matches no ceremony');
+        await expect(peripheral.pair({ protectionLevel: 1.5 as any })).rejects.toThrow(
+          'pair() protectionLevel must be a finite uint32 DevicePairingProtectionLevel');
+        expect(bindings.pair).not.toHaveBeenCalled();
+      });
+
+      test('rejects options mixed with a positional protection level', async () => {
+        await expect((peripheral.pair as any)({ pin: '123456' }, DevicePairingProtectionLevel.EncryptionAndAuthentication))
+          .rejects.toThrow(new TypeError('pair() takes either options or (kind, protectionLevel), not both'));
+        expect(bindings.pair).not.toHaveBeenCalled();
+      });
+
+      test('an array is not options', async () => {
+        await expect(peripheral.pair([] as any)).rejects.toThrow(
+          'pair() kind must be a finite uint32 DevicePairingKinds bitmask');
+      });
+
+      test('validation failures reject instead of throwing', () => {
+        let pairing: Promise<void> | undefined;
+
+        expect(() => { pairing = peripheral.pair({ pin: 1 as any }); }).not.toThrow();
+        return expect(pairing).rejects.toBeInstanceOf(TypeError);
+      });
+
+      test('a PIN is validated before platform support is checked', async () => {
+        delete bindings.pair;
+
+        await expect(peripheral.pair({ pin: '' })).rejects.toBeInstanceOf(TypeError);
+        await expect(peripheral.pair({ pin: '123456' })).rejects.toBeInstanceOf(NotSupportedError);
+      });
+
+      test('a pairing failure does not carry the PIN', async () => {
+        bindings.pair!.mockRejectedValueOnce(new Error('pairing failed with status AuthenticationFailure'));
+
+        const error = await peripheral.pair({ pin: '987654' }).catch((e: Error) => e);
+
+        expect(String((error as Error).message)).not.toContain('987654');
+      });
+    });
+  });
+
+  describe('isPaired', () => {
+    test('resolves true when the bindings report a bond', async () => {
+      bindings.isPaired!.mockResolvedValueOnce(true);
+
+      await expect(peripheral.isPaired()).resolves.toBe(true);
+      expect(bindings.isPaired).toHaveBeenCalledWith(ID);
+    });
+
+    test('resolves false when the bindings report no bond', async () => {
+      await expect(peripheral.isPaired()).resolves.toBe(false);
+      expect(bindings.isPaired).toHaveBeenCalledTimes(1);
+    });
+
+    test('resolves false when the bindings have no pairing state', async () => {
+      delete bindings.isPaired;
+
+      await expect(peripheral.isPaired()).resolves.toBe(false);
+    });
+
+    test('propagates a failure from the bindings', async () => {
+      bindings.isPaired!.mockRejectedValueOnce(new Error('peripheral aabbccddeeff is not connected'));
+
+      await expect(peripheral.isPaired()).rejects.toThrow('peripheral aabbccddeeff is not connected');
+    });
   });
 
   describe('updateRssi', () => {

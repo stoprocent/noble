@@ -353,6 +353,9 @@ export class HciBindings implements Bindings, HciDelegate, GapDelegate {
       for (const connection of abandoned) {
         connection.deferred.reject(adapterStateError(state));
       }
+
+      // After the connection queue is emptied: nothing may start connecting from here.
+      this.resetScanning(state);
     }
 
     if (state === 'unauthorized') {
@@ -631,6 +634,43 @@ export class HciBindings implements Bindings, HciDelegate, GapDelegate {
       // this will trigger onExit, and clean up
       // eslint-disable-next-line no-process-exit
       process.exit(1);
+    }
+  }
+
+  /**
+   * The adapter left poweredOn, so whatever scan there was is over. A down
+   * adapter completes no command, which means the scan stop cannot be learned
+   * from the gap: the scan state of both layers is reset here and everybody
+   * waiting on it is settled.
+   */
+  private resetScanning (state: AdapterState): void {
+    const wasScanning = this.isScanning || this.isScanningStarted;
+
+    this.isScanning = false;
+    this.isScanningStarted = false;
+    this.gap?.reset();
+
+    const parametersWaiters = this.scanParametersWaiters;
+    const startWaiters = this.scanStartWaiters;
+    const stopWaiters = this.scanStopWaiters;
+    this.scanParametersWaiters = [];
+    this.scanStartWaiters = [];
+    this.scanStopWaiters = [];
+
+    if (wasScanning) {
+      this.delegate?.onScanStop();
+    }
+
+    const name = state || 'unknown';
+    for (const waiter of parametersWaiters) {
+      waiter.reject(new AdapterStateError(`Could not set scan parameters, adapter state is ${name} (not poweredOn)`, name));
+    }
+    for (const waiter of startWaiters) {
+      waiter.reject(new AdapterStateError(`Could not start scanning, adapter state is ${name} (not poweredOn)`, name));
+    }
+    for (const waiter of stopWaiters) {
+      // scanning has in fact stopped
+      waiter.resolve();
     }
   }
 

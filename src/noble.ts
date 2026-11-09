@@ -268,8 +268,15 @@ export class Noble {
     protectionLevel?: DevicePairingProtectionLevel | null
   ): Promise<void> {
     this.start();
-    // Peripheral.pair() tells the two call forms apart and validates them.
-    await this.peripheralFor(idOrAddress).pair(kindOrOptions as DevicePairingKinds, protectionLevel);
+    const peripheral = this.peripheralFor(idOrAddress);
+    if (typeof kindOrOptions === 'object' && kindOrOptions !== null) {
+      if (protectionLevel !== undefined) {
+        throw new TypeError('pair() takes either options or (kind, protectionLevel), not both');
+      }
+      await peripheral.pair(kindOrOptions);
+    } else {
+      await peripheral.pair(kindOrOptions, protectionLevel);
+    }
   }
 
   /** Whether a peripheral, by id or MAC address, is already paired. See {@link Peripheral.isPaired}. */

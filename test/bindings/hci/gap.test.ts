@@ -72,6 +72,94 @@ describe('hci-socket gap', () => {
     expect(hci.setScanEnabled).toHaveBeenCalledWith(false, true);
   });
 
+  describe('reset', () => {
+    const report = (address: string) => ({
+      status: 0,
+      type: 0x00,
+      address,
+      addressType: 'public' as const,
+      eir: Buffer.from([0x04, 0x09, 0x73, 0x69, 0x6d]),
+      rssi: -60
+    });
+
+    it('clears the scan state and the accumulated discoveries without touching the controller', () => {
+      const hci = { setScanEnabled: jest.fn(), setScanParameters: jest.fn() };
+      const delegate = createDelegate();
+      const gap = new Gap(hci as any, delegate) as any;
+
+      gap.startScanning(false);
+      gap.onHciLeScanEnableSet(0);
+      gap.onHciLeAdvertisingReport(report('aa:bb:cc:dd:ee:ff'));
+      expect(gap.scanState).toBe('started');
+      expect(gap.discoveries.size).toBe(1);
+      hci.setScanEnabled.mockClear();
+      hci.setScanParameters.mockClear();
+      delegate.onScanStart.mockClear();
+
+      gap.reset();
+
+      expect(gap.scanState).toBe(null);
+      expect(gap.scanFilterDuplicates).toBe(null);
+      expect(gap.discoveries.size).toBe(0);
+      expect(hci.setScanEnabled).not.toHaveBeenCalled();
+      expect(hci.setScanParameters).not.toHaveBeenCalled();
+      expect(delegate.onScanStop).not.toHaveBeenCalled();
+      expect(delegate.onScanStart).not.toHaveBeenCalled();
+    });
+
+    it.each(['starting', 'started', 'stopping', 'stopped'])('a late completion after a reset from %s reports nothing', (state) => {
+      const hci = { setScanEnabled: jest.fn(), setScanParameters: jest.fn() };
+      const delegate = createDelegate();
+      const gap = new Gap(hci as any, delegate) as any;
+      gap.scanState = state;
+
+      gap.reset();
+      gap.onHciLeScanEnableSet(0);
+      gap.onLeScanEnableSetCmd(false, true);
+
+      expect(gap.scanState).toBe(null);
+      expect(delegate.onScanStart).not.toHaveBeenCalled();
+      expect(delegate.onScanStop).not.toHaveBeenCalled();
+    });
+
+    it('a discovery after a reset starts from scratch', () => {
+      const hci = { setScanEnabled: jest.fn(), setScanParameters: jest.fn() };
+      const delegate = createDelegate();
+      const gap = new Gap(hci as any, delegate) as any;
+
+      gap.onHciLeAdvertisingReport(report('aa:bb:cc:dd:ee:ff'));
+      gap.reset();
+      gap.onHciLeAdvertisingReport(report('aa:bb:cc:dd:ee:ff'));
+
+      // a first connectable advertisement is held back, as on a fresh instance
+      expect(delegate.onDiscover).not.toHaveBeenCalled();
+      expect(gap.discoveries.get('aa:bb:cc:dd:ee:ff').count).toBe(1);
+    });
+
+    it('poweredOn -> poweredOff -> poweredOn: scanning starts and reports again after a reset', () => {
+      const hci = { setScanEnabled: jest.fn(), setScanParameters: jest.fn() };
+      const delegate = createDelegate();
+      const gap = new Gap(hci as any, delegate) as any;
+
+      gap.startScanning(false);
+      gap.onHciLeScanEnableSet(0);
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(1);
+
+      // the adapter goes down: no completion ever arrives for the scan
+      gap.reset();
+      hci.setScanEnabled.mockClear();
+
+      gap.startScanning(true);
+      expect(hci.setScanEnabled).toHaveBeenLastCalledWith(true, false);
+      gap.onHciLeScanEnableSet(0);
+
+      expect(gap.scanState).toBe('started');
+      expect(delegate.onScanStart).toHaveBeenCalledTimes(2);
+      expect(delegate.onScanStart).toHaveBeenLastCalledWith(false);
+      expect(delegate.onScanStop).not.toHaveBeenCalled();
+    });
+  });
+
   it('onHciLeScanParametersSet', () => {
     const hci = {};
     const delegate = createDelegate();

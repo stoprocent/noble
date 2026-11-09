@@ -14,6 +14,9 @@ const SMP_PAIRING_RANDOM = 0x04;
 const SMP_PAIRING_FAILED = 0x05;
 const SMP_ENCRYPT_INFO = 0x06;
 const SMP_MASTER_IDENT = 0x07;
+const SMP_SECURITY_REQUEST = 0x0b;
+
+const SMP_REASON_PAIRING_NOT_SUPPORTED = 0x05;
 
 /** Outcome of the pairing procedure, reported by `Smp` to its owner. */
 export interface SmpDelegate {
@@ -41,6 +44,8 @@ export class Smp {
   private tk: Buffer | null = null;
   private r: Buffer | null = null;
   private pcnf: Buffer | null = null;
+  /** Our own Pairing Request is out and has not failed. */
+  private pairing = false;
 
   constructor (
     private readonly aclStream: SmpChannel,
@@ -68,6 +73,7 @@ export class Smp {
       0x00, // Initiator key distribution: <none>
       0x01 // Responder key distribution: EncKey
     ]);
+    this.pairing = true;
 
     this.write(this.preq);
   }
@@ -87,6 +93,8 @@ export class Smp {
       this.handleEncryptInfo(data);
     } else if (SMP_MASTER_IDENT === code) {
       this.handleMasterIdent(data);
+    } else if (SMP_SECURITY_REQUEST === code) {
+      this.handleSecurityRequest();
     }
   }
 
@@ -144,12 +152,41 @@ export class Smp {
         SMP_PAIRING_CONFIRM
       ]));
 
+      this.pairing = false;
       this.delegate.onFail();
     }
   }
 
   private handlePairingFailed (): void {
+    this.pairing = false;
     this.delegate.onFail();
+  }
+
+  /**
+   * Core Spec Vol 3 Part H 3.6.7: a central that receives a Security Request
+   * has to initiate pairing, encrypt the link with an existing LTK, or reply
+   * with Pairing Failed. Pairing only ever starts on the application's
+   * request and no keys are stored, so the answer is Pairing Failed with
+   * reason Pairing Not Supported; staying silent can make the peripheral
+   * drop the link. The peripheral is free to carry on unencrypted.
+   *
+   * This is not the failure of a pairing of our own, so the delegate is not
+   * told. The same section has the central ignore the request once it has
+   * sent a Pairing Request (the pairing asked for is already under way), and
+   * a Pairing Failed at that point would abort it.
+   */
+  private handleSecurityRequest (): void {
+    if (this.pairing) {
+      debug('security request while pairing, ignoring');
+      return;
+    }
+
+    debug('security request, replying pairing not supported');
+
+    this.write(Buffer.from([
+      SMP_PAIRING_FAILED,
+      SMP_REASON_PAIRING_NOT_SUPPORTED
+    ]));
   }
 
   private handleEncryptInfo (data: Buffer): void {
