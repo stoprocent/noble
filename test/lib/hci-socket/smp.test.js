@@ -57,6 +57,13 @@ describe('hci-socket smp', () => {
     expect(smp._ra).toEqual(Buffer.from([0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa]));
   });
 
+  test('should reply Pairing Failed (Pairing Not Supported) to Security Request', () => {
+    smp.onAclStreamData(0x0006, Buffer.from([0x0b, 0x01]));
+
+    expect(aclStream.write).toHaveBeenCalledTimes(1);
+    expect(aclStream.write).toHaveBeenCalledWith(0x0006, Buffer.from([0x05, 0x05]));
+  });
+
   test('should write sendPairingRequest', () => {
     smp.write = jest.fn();
 
