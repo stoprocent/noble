@@ -50,7 +50,9 @@ public:
         noble::RequestId requestId,
         const std::string& uuid,
         winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds,
-        winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel);
+        winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel,
+        const std::string& pin);
+    void IsPaired(noble::RequestId requestId, const std::string& uuid);
     void Disconnect(const std::string& uuid);
     void CancelConnect(const std::string& uuid);
     void UpdateRSSI(noble::RequestId requestId, const std::string& uuid);

@@ -18,6 +18,13 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
     listeners: Record<string, (arg?: any) => void> = {};
     commands: number[] = [];
     notifyAfterSubscribe = true;
+    /** The adapter is up; while it is down nothing written is answered. */
+    up = true;
+    /** The peripheral asks for security right after the connection is up. */
+    securityRequestOnConnect = false;
+    /** What the peripheral received on the SMP and ATT channels. */
+    smpReceived: Buffer[] = [];
+    attReceived: Buffer[] = [];
 
     constructor () {
       mockSockets.push(this);
@@ -34,11 +41,21 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
     start (): void {}
     stop (): void {}
     setFilter (): void {}
-    isDevUp (): boolean { return true; }
+    isDevUp (): boolean { return this.up; }
+
+    /** Powers the adapter down or up and has the kernel report it. */
+    power (up: boolean): void {
+      this.up = up;
+      this.listeners.state?.();
+    }
 
     write (packet: Buffer): void {
       // A controller never answers from inside the write call.
       setImmediate(() => {
+        if (!this.up) {
+          // ENETDOWN: the command is lost, no completion will ever come
+          return;
+        }
         if (packet[0] === 0x01) {
           this.onCommand(packet.readUInt16LE(1), packet.slice(4));
         } else if (packet[0] === 0x02) {
@@ -75,11 +92,16 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
           return;
         case 0x200d: // LE Create Connection -> Command Status, then LE Connection Complete
           this.receive(Buffer.from([0x04, 0x0f, 0x04, 0x00, 0x01, 0x0d, 0x20]));
-          return this.receive(Buffer.concat([
+          this.receive(Buffer.concat([
             Buffer.from([0x04, 0x3e, 0x13, 0x01, 0x00, CONNECTION_HANDLE, 0x00, 0x00, 0x00]),
             PERIPHERAL_ADDRESS,
             Buffer.from([0x06, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x00])
           ]));
+          if (this.securityRequestOnConnect) {
+            // SMP Security Request, AuthReq: bonding
+            this.sendL2cap(0x0006, Buffer.from([0x0b, 0x01]));
+          }
+          return;
         case 0x0406: // Disconnect -> Disconnection Complete, reason: local host terminated
           this.receive(Buffer.from([0x04, 0x0f, 0x04, 0x00, 0x01, 0x06, 0x04]));
           return this.receive(Buffer.from([0x04, 0x05, 0x04, 0x00, params[0], params[1], 0x16]));
@@ -107,20 +129,27 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
       this.receive(Buffer.from([0x04, 0x13, 0x05, 0x01, handle & 0xff, handle >> 8, 0x01, 0x00]));
 
       if (packet.readUInt16LE(7) === 0x0004) {
+        this.attReceived.push(packet.slice(9));
         const response = this.onAtt(packet.slice(9));
         if (response) {
           this.sendAtt(response);
         }
+      } else if (packet.readUInt16LE(7) === 0x0006) {
+        this.smpReceived.push(packet.slice(9));
       }
     }
 
     sendAtt (pdu: Buffer): void {
+      this.sendL2cap(0x0004, pdu);
+    }
+
+    sendL2cap (cid: number, pdu: Buffer): void {
       const header = Buffer.alloc(9);
       header.writeUInt8(0x02, 0);
       header.writeUInt16LE(CONNECTION_HANDLE | (0x02 << 12), 1);
       header.writeUInt16LE(pdu.length + 4, 3);
       header.writeUInt16LE(pdu.length, 5);
-      header.writeUInt16LE(0x0004, 7);
+      header.writeUInt16LE(cid, 7);
       this.receive(Buffer.concat([header, pdu]));
     }
 
@@ -185,7 +214,7 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
 
 import { HciBindings } from '../../src/bindings/hci/bindings';
 import { AttError } from '../../src/bindings/hci/gatt';
-import { DisconnectedError, Noble, type Peripheral } from '../../src';
+import { AdapterStateError, DisconnectedError, Noble, type Peripheral } from '../../src';
 
 describe('HCI stack end to end', () => {
   let noble: Noble;
@@ -316,5 +345,126 @@ describe('HCI stack end to end', () => {
     await expect(read).rejects.toMatchObject({ reason: 0x08 });
     await expect(read).rejects.toBeInstanceOf(DisconnectedError);
     expect(peripheral.state).toBe('disconnected');
+  });
+
+  test('a Security Request right after connection is answered and the link stays usable (issue #142)', async () => {
+    await noble.waitForPoweredOn(1000);
+    const socket = mockSockets[0];
+    socket.securityRequestOnConnect = true;
+
+    const peripheral = await noble.connect('0a:0b:0c:0d:0e:0f', { addressType: 'public' });
+    const [service] = await peripheral.discoverServices();
+    const [characteristic] = await service.discoverCharacteristics();
+
+    // Pairing Failed, reason Pairing Not Supported: the only thing sent on the SMP channel
+    expect(socket.smpReceived).toEqual([Buffer.from([0x05, 0x05])]);
+    expect(peripheral.state).toBe('connected');
+    expect(await characteristic.read()).toEqual(Buffer.from([0x64]));
+
+    await peripheral.disconnect();
+  });
+
+  test('the negotiated MTU is the lower of the requested one and the peer\'s (PR #139)', async () => {
+    await noble.waitForPoweredOn(1000);
+    const socket = mockSockets[0];
+
+    const peripheral = await noble.connect('0a:0b:0c:0d:0e:0f', { addressType: 'public', mtu: 23 });
+    await peripheral.discoverServices();
+
+    // 23 went out, the peripheral answered 64: ATT_MTU stays 23
+    expect(socket.attReceived[0]).toEqual(Buffer.from([0x02, 0x17, 0x00]));
+    expect(peripheral.mtu).toBe(23);
+
+    await peripheral.disconnect();
+  });
+
+  test('an unusable requested MTU is replaced by the default on the wire', async () => {
+    await noble.waitForPoweredOn(1000);
+    const socket = mockSockets[0];
+
+    const peripheral = await noble.connect('0a:0b:0c:0d:0e:0f', { addressType: 'public', mtu: 70000 });
+    await peripheral.discoverServices();
+
+    expect(socket.attReceived[0]).toEqual(Buffer.from([0x02, 0x00, 0x01]));
+    expect(peripheral.mtu).toBe(64);
+
+    await peripheral.disconnect();
+  });
+
+  describe('adapter power cycle (issue #143)', () => {
+    const SCAN_ENABLE = 0x200c;
+    const scanEnables = (socket: any): number => socket.commands.filter((opcode: number) => opcode === SCAN_ENABLE).length;
+    /** Lets the simulated controller answer everything that was written. */
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 20; i++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    };
+
+    test('a scan interrupted by a power-off is reported stopped, and scanning works again after power-on', async () => {
+      const scanStops: string[] = [];
+      const events: string[] = [];
+      noble.onScanStop(() => { scanStops.push(noble.state); events.push('scanStop'); });
+      noble.onStateChange(state => events.push(state));
+
+      await noble.waitForPoweredOn(1000);
+      const socket = mockSockets[0];
+      events.length = 0;
+
+      // The discovery loop ends by itself when the adapter goes down under it.
+      const seen: string[] = [];
+      for await (const peripheral of noble.discover()) {
+        seen.push(peripheral.id);
+        socket.power(false);
+      }
+      expect(seen).toEqual(['0a0b0c0d0e0f']);
+      expect(noble.state).toBe('poweredOff');
+      // reported from the state transition, before it: no completion can arrive from a down adapter
+      expect(events).toEqual(['scanStop', 'poweredOff']);
+      expect(scanStops).toEqual(['poweredOn']);
+
+      await expect(noble.startScanning()).rejects.toBeInstanceOf(AdapterStateError);
+
+      socket.power(true);
+      await noble.waitForPoweredOn(1000);
+      await settle();
+      const enablesBefore = scanEnables(socket);
+
+      // The controller is driven again (not a scanStart from a stale flag), so advertisements arrive.
+      const peripheral = await discoverSim();
+      expect(peripheral.id).toBe('0a0b0c0d0e0f');
+      expect(scanEnables(socket)).toBeGreaterThan(enablesBefore);
+    });
+
+    test('a start that the adapter never completes rejects when it powers off', async () => {
+      await noble.waitForPoweredOn(1000);
+      const socket = mockSockets[0];
+      await settle();
+
+      // The adapter is already down, the host just has not noticed: the commands are lost.
+      socket.up = false;
+      const starting = noble.startScanning();
+      await settle();
+      socket.power(false);
+
+      await expect(starting).rejects.toBeInstanceOf(AdapterStateError);
+      expect(noble.state).toBe('poweredOff');
+    });
+
+    test('a connect after the power cycle goes straight to the controller', async () => {
+      await noble.waitForPoweredOn(1000);
+      const socket = mockSockets[0];
+      await noble.startScanning();
+
+      socket.power(false);
+      socket.power(true);
+      await noble.waitForPoweredOn(1000);
+
+      const peripheral = await noble.connect('0a:0b:0c:0d:0e:0f', { addressType: 'public' });
+      expect(peripheral.state).toBe('connected');
+      expect(await peripheral.discoverServices()).toHaveLength(1);
+
+      await peripheral.disconnect();
+    });
   });
 });

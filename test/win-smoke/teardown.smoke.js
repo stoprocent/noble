@@ -66,6 +66,7 @@ const requestsWhileStopped = (bindings) => [
   bindings.stopScanning(),
   bindings.connect(PERIPHERAL),
   bindings.updateRssi(PERIPHERAL),
+  bindings.isPaired(PERIPHERAL),
   bindings.discoverServices(PERIPHERAL, []),
   bindings.read(PERIPHERAL, SERVICE, CHARACTERISTIC),
   bindings.write(PERIPHERAL, SERVICE, CHARACTERISTIC, Buffer.from([1]), false),

@@ -328,9 +328,22 @@ await noble.pair(
   DevicePairingKinds.ConfirmOnly,
   DevicePairingProtectionLevel.EncryptionAndAuthentication
 );
+
+// The same choices as an options object.
+await peripheral.pair({ kind: DevicePairingKinds.DisplayPin });
+
+// Supply a PIN for authenticated ProvidePin / ConfirmPinMatch pairing.
+await peripheral.pair({ pin: '123456' });
+await noble.pair(idOrAddress, { pin: '123456' });
+
+// A connected peripheral can be checked first, to skip asking for a PIN.
+if (!(await peripheral.isPaired())) { // or: await noble.isPaired(idOrAddress)
+  // ask for the PIN, then pair
+}
 ```
 
-The promise resolves when pairing succeeded and rejects otherwise.
+The `pair` promise resolves when pairing succeeded (or the device was already
+paired) and rejects otherwise.
 
 **Platform support and limitations — please read before using pairing:**
 
@@ -344,9 +357,25 @@ The promise resolves when pairing succeeded and rejects otherwise.
   `protectionLevel` defaults to `Encryption`. You can pass a
   `DevicePairingKinds` bitmask (single or OR-ed values) and (optionally)
   `DevicePairingProtectionLevel`.
-  `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI;
-  PIN/password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
-  rejected because this library does not collect secrets to pass into WinRT.
+  The same values can be given as `pair({ kind, protectionLevel })`.
+  `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI.
+  `ProvidePin` is rejected unless a PIN is supplied (see below), and the
+  password kinds (`ProvidePassword`, `ConfirmPassword`) are always rejected:
+  this library has no way to pass a password into WinRT.
+- **PIN pairing.** `pair({ pin })` takes the PIN shown by, or configured on,
+  the peripheral as a non-empty string. `kind` then defaults to
+  `ConfirmOnly | ProvidePin | ConfirmPinMatch` and `protectionLevel` to
+  `EncryptionAndAuthentication`, the only level accepted together with a PIN.
+  The PIN answers a `ProvidePin` request; a `ConfirmPinMatch` request is
+  accepted only when the PIN Windows presents equals the supplied one, and
+  pairing fails otherwise. A PIN that is not a non-empty string, or one
+  combined with another protection level, rejects with a `TypeError` before
+  anything is sent. The PIN's format is not checked. noble never logs the
+  PIN; collecting and storing it safely is up to the application.
+- **`isPaired()` reports Windows' pairing state.** It resolves `true` when
+  Windows reports the connected device as paired. On the Windows binding it
+  rejects when the peripheral is unknown or not connected; on every other
+  binding it resolves `false`, because they expose no pairing state.
 
 ### Service
 

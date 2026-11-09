@@ -155,7 +155,7 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
     return request.second;
 }
 
-// pair(deviceUuid, kinds?, protectionLevel?)
+// pair(deviceUuid, kinds?, protectionLevel?, pin?)
 Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
 {
     ARG1(String)
@@ -175,8 +175,37 @@ Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
         getUint32(info[1], static_cast<uint32_t>(DevicePairingKinds::None)));
     auto protectionLevel = static_cast<DevicePairingProtectionLevel>(
         getUint32(info[2], static_cast<uint32_t>(DevicePairingProtectionLevel::Encryption)));
+
+    // `pin` is optional: undefined / null (or an absent argument) mean "no
+    // PIN". The JS layer only forwards a non-empty string, so an empty one is
+    // refused here rather than read as "no PIN": a caller that supplied a PIN
+    // asked for authenticated pairing. The value is a secret and is never
+    // logged or echoed in an error message.
+    std::string pin;
+    if (info.Length() > 3 && !info[3].IsUndefined() && !info[3].IsNull())
+    {
+        if (!info[3].IsString())
+        {
+            THROW("The optional PIN argument must be a string")
+        }
+        pin = info[3].As<Napi::String>().Utf8Value();
+        if (pin.empty())
+        {
+            THROW("The optional PIN argument must not be empty")
+        }
+    }
     REQUEST()
-    manager->Pair(request.first, uuid, kinds, protectionLevel);
+    manager->Pair(request.first, uuid, kinds, protectionLevel, pin);
+    return request.second;
+}
+
+// isPaired(deviceUuid)
+Napi::Value NobleWinrt::IsPaired(const Napi::CallbackInfo& info)
+{
+    ARG1(String)
+    auto uuid = napiToPeripheralId(info[0].As<Napi::String>());
+    REQUEST()
+    manager->IsPaired(request.first, uuid);
     return request.second;
 }
 
@@ -395,6 +424,7 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
         NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
         NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
         NobleWinrt::InstanceMethod("pair", &NobleWinrt::Pair),
+        NobleWinrt::InstanceMethod("isPaired", &NobleWinrt::IsPaired),
         NobleWinrt::InstanceMethod("disconnect", &NobleWinrt::Disconnect),
         NobleWinrt::InstanceMethod("cancelConnect", &NobleWinrt::CancelConnect),
         NobleWinrt::InstanceMethod("updateRssi", &NobleWinrt::UpdateRSSI),

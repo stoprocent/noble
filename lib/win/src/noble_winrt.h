@@ -21,6 +21,7 @@ public:
     Napi::Value StopScan(const Napi::CallbackInfo&);
     Napi::Value Connect(const Napi::CallbackInfo&);
     Napi::Value Pair(const Napi::CallbackInfo&);
+    Napi::Value IsPaired(const Napi::CallbackInfo&);
     Napi::Value Disconnect(const Napi::CallbackInfo&);
     Napi::Value CancelConnect(const Napi::CallbackInfo&);
     Napi::Value UpdateRSSI(const Napi::CallbackInfo&);

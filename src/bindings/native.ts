@@ -14,7 +14,7 @@ import type { Bindings } from './bindings';
  * - peripheral ids and UUIDs are lowercase hex without dashes;
  * - a failed request rejects with an `Error` carrying the platform's message;
  * - requests still pending when their peripheral disconnects are rejected;
- * - `pair` exists on Windows only, `broadcast` and `reset` on neither.
+ * - `pair` and `isPaired` exist on Windows only, `broadcast` and `reset` on neither.
  */
 export type NativeAddonName = 'NobleMac' | 'NobleWinrt';
 
