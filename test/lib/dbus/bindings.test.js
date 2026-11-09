@@ -189,6 +189,63 @@ describe('dbus/bindings', () => {
     expect(states).toContain('poweredOff');
   });
 
+  describe('adapter selection', () => {
+    const twoAdapters = () => adapterTree({
+      '/org/bluez/hci1': {
+        'org.bluez.Adapter1': { Address: '66:77:88:99:AA:BB', Powered: true, Discovering: false }
+      }
+    });
+
+    async function startedAddress (options, warnings = []) {
+      const bindings = new DbusBindings(options);
+      const addresses = [];
+      bindings.on('addressChange', a => addresses.push(a));
+      bindings.on('warning', w => warnings.push(w));
+      bindings.start();
+      await flush();
+      return addresses[addresses.length - 1];
+    }
+
+    beforeEach(() => {
+      delete process.env.NOBLE_HCI_DEVICE_ID;
+      resetState(twoAdapters());
+    });
+
+    afterEach(() => {
+      delete process.env.NOBLE_HCI_DEVICE_ID;
+    });
+
+    test('uses the first adapter by default', async () => {
+      expect(await startedAddress()).toBe('00:11:22:33:44:55');
+    });
+
+    test('uses the adapter named by NOBLE_HCI_DEVICE_ID', async () => {
+      process.env.NOBLE_HCI_DEVICE_ID = '1';
+      expect(await startedAddress()).toBe('66:77:88:99:AA:BB');
+    });
+
+    test('warns and uses the first adapter when the requested one does not exist', async () => {
+      process.env.NOBLE_HCI_DEVICE_ID = '3';
+      const warnings = [];
+      expect(await startedAddress(undefined, warnings)).toBe('00:11:22:33:44:55');
+      expect(warnings.some(w => /adapter hci3 not found/.test(w))).toBe(true);
+    });
+
+    test('ignores an empty NOBLE_HCI_DEVICE_ID', async () => {
+      process.env.NOBLE_HCI_DEVICE_ID = '';
+      const warnings = [];
+      expect(await startedAddress(undefined, warnings)).toBe('00:11:22:33:44:55');
+      expect(warnings).toEqual([]);
+    });
+
+    test('prefers the hciDeviceId and adapterId options over NOBLE_HCI_DEVICE_ID', async () => {
+      process.env.NOBLE_HCI_DEVICE_ID = '1';
+      expect(await startedAddress({ hciDeviceId: 0 })).toBe('00:11:22:33:44:55');
+      resetState(twoAdapters());
+      expect(await startedAddress({ adapterId: 'hci0' })).toBe('00:11:22:33:44:55');
+    });
+  });
+
   test('emits unsupported when no adapter is found', async () => {
     resetState({ '/org/bluez': { 'org.freedesktop.DBus.ObjectManager': {} } });
     const bindings = new DbusBindings();
