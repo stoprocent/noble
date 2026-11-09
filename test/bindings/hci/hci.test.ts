@@ -5,7 +5,7 @@ const mockSocket: any = function () {};
 
 jest.mock('@stoprocent/bluetooth-hci-socket', () => ({
   loadDriver: () => mockSocket
-}));
+}), { virtual: true });
 
 const createDelegate = () => ({
   onStateChange: jest.fn(),

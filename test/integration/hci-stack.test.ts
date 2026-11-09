@@ -181,7 +181,7 @@ jest.mock('@stoprocent/bluetooth-hci-socket', () => {
   }
 
   return { loadDriver: () => MockSocket };
-});
+}, { virtual: true });
 
 import { HciBindings } from '../../src/bindings/hci/bindings';
 import { AttError } from '../../src/bindings/hci/gatt';

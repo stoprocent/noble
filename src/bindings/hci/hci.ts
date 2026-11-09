@@ -1,5 +1,4 @@
 import createDebug from 'debug';
-import { loadDriver } from '@stoprocent/bluetooth-hci-socket';
 
 import type { AdapterState } from '../../types';
 import {
@@ -90,6 +89,26 @@ interface HciSocket {
   bindUser (deviceId?: number, params?: HciBindingsOptions['bindParams']): number;
   setFilter (filter: Buffer): void;
   write (data: Buffer): void;
+}
+
+/**
+ * Loads the socket driver. `@stoprocent/bluetooth-hci-socket` is an optional
+ * dependency, so it is required on first use rather than imported: noble must
+ * build, load and run its other backends on machines where it is missing.
+ */
+function loadSocketDriver (driver: NonNullable<HciBindingsOptions['hciDriver']>): new () => HciSocket {
+  let driverModule: { loadDriver (driver: string): new () => HciSocket };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    driverModule = require('@stoprocent/bluetooth-hci-socket');
+  } catch (cause) {
+    throw new Error(
+      'noble HCI bindings require the "@stoprocent/bluetooth-hci-socket" package, which is not installed ' +
+      '(it is an optional dependency and may have failed to build on this platform)',
+      { cause }
+    );
+  }
+  return driverModule.loadDriver(driver);
 }
 
 /** Controller ACL buffer budget: maximum packet payload and number of packets in flight. */
@@ -201,8 +220,8 @@ export class Hci {
   constructor (options: HciBindingsOptions, delegate: HciDelegate) {
     this.delegate = delegate;
 
-    const BluetoothHciSocket = loadDriver(options.hciDriver || 'default');
-    this.socket = new BluetoothHciSocket() as unknown as HciSocket;
+    const BluetoothHciSocket = loadSocketDriver(options.hciDriver || 'default');
+    this.socket = new BluetoothHciSocket();
 
     this.extendedModeConfigured = Object.prototype.hasOwnProperty.call(options, 'extended');
     this.isExtended = this.extendedModeConfigured ? Boolean(options.extended) : false;

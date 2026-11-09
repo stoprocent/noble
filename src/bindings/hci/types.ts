@@ -144,11 +144,33 @@ export interface ConnectionParameterUpdateRequest {
   supervisionTimeout: number;
 }
 
+/*
+ * The driver comes from `@stoprocent/bluetooth-hci-socket`, an optional
+ * dependency that is absent wherever it could not be installed. Its option
+ * types are therefore mirrored here instead of imported.
+ */
+export type HciDriverType = 'default' | 'uart' | 'usb' | 'native';
+
+export interface HciBindParams {
+  usb?: {
+    vid: number;
+    pid: number;
+    bus?: number;
+    address?: number;
+  };
+  uart?: {
+    port: string;
+    baudRate?: number;
+    retryConnection?: number;
+    flowControl?: boolean;
+  };
+}
+
 export interface HciBindingsOptions {
-  /** Driver type: 'default' | 'uart' | 'usb' | 'native'. */
-  hciDriver?: import('@stoprocent/bluetooth-hci-socket').DriverType;
+  /** Which transport the HCI socket uses. */
+  hciDriver?: HciDriverType;
   /** Bind params (USB and UART drivers only). */
-  bindParams?: Partial<import('@stoprocent/bluetooth-hci-socket').BindParams>;
+  bindParams?: HciBindParams;
   /** HCI device id (Linux only). Defaults to `NOBLE_HCI_DEVICE_ID`, then 0. */
   deviceId?: number;
   /** Use BLE 5 extended features. Defaults to what LE Read Local Supported Features reports. */
