@@ -426,6 +426,7 @@ Other behavioural changes worth knowing about:
 - On the HCI bindings a characteristic/descriptor read that the peripheral answers with an ATT error now rejects (1.x resolved with an empty buffer).
 - The undocumented GATT handle-cache hooks (`servicesDiscovered` / `characteristicsDiscovered` events, `noble.addServices()`, `noble.addCharacteristics()`) were removed.
 - Node.js 18 or newer is required.
+- The macOS backend was rewritten in Swift and the Windows backend now reports through promises natively. Both reject requests that 1.x silently dropped (unknown peripheral, undiscovered service or characteristic, adapter not powered on), and the Windows backend now rejects writes and subscriptions whose GATT status is not `Success`.
 
 ## Installation
 
@@ -479,7 +480,8 @@ import noble from '@stoprocent/noble';
 
 #### OS X
 
- * Install [Xcode](https://itunes.apple.com/ca/app/xcode/id497799835?mt=12)
+ * macOS 11 or newer. Prebuilt binaries (x64 and arm64) are included, so nothing has to be compiled for a normal install.
+ * To build the addon from source you need [Xcode](https://itunes.apple.com/ca/app/xcode/id497799835?mt=12) or the Xcode Command Line Tools: the CoreBluetooth backend is written in Swift (with a small C++ N-API layer) and is compiled with `swiftc` as part of `node-gyp rebuild`.
  * On newer versions of OSX, allow bluetooth access on the terminal app: "System Preferences" —> "Security & Privacy" —> "Bluetooth" -> Add terminal app (see [Sandboxed terminal](#sandboxed-terminal))
 
 #### Linux
