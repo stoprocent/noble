@@ -48,13 +48,13 @@ interface Connection {
 const HCI_HARDWARE_FAILURE = 0x03;
 
 const UNAUTHORIZED_WARNING = [
-  'noble warning: adapter state unauthorized, please run as root or with sudo',
+  'adapter state unauthorized, please run as root or with sudo',
   '               or see README for information on running without root/sudo:',
   '               https://github.com/sandeepmistry/noble#running-on-linux'
 ].join('\n');
 
 const UNSUPPORTED_WARNING = [
-  'noble warning: adapter does not support Bluetooth Low Energy (BLE, Bluetooth Smart).',
+  'adapter does not support Bluetooth Low Energy (BLE, Bluetooth Smart).',
   '               Try to run with environment variable:',
   '               [sudo] NOBLE_HCI_DEVICE_ID=x node ...'
 ].join('\n');
@@ -505,7 +505,7 @@ export class HciBindings implements Bindings, HciDelegate, GapDelegate {
     const connection = this.connections.get(handle);
 
     if (!connection) {
-      this.delegate?.onWarning(`noble warning: unknown handle ${handle} disconnected!`);
+      this.delegate?.onWarning(`unknown handle ${handle} disconnected!`);
       return;
     }
 

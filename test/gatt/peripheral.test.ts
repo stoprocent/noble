@@ -79,6 +79,14 @@ describe('Peripheral', () => {
       });
     });
 
+    test('fields a report carries as null are ignored too (the native addons send null for "absent")', () => {
+      session.advertised.emit(discovery({
+        advertisement: { localName: null, txPowerLevel: null, serviceUuids: ['180a'], serviceData: [] }
+      }));
+
+      expect(peripheral.advertisement).toEqual({ localName: 'device', serviceUuids: ['180a'], serviceData: [] });
+    });
+
     test('updates rssi, connectable and scannable', () => {
       const update = discovery({ connectable: false, rssi: -90 });
       delete update.scannable;
@@ -207,6 +215,36 @@ describe('Peripheral', () => {
       expect(onDisconnect).not.toHaveBeenCalled();
     });
 
+    test('a link that comes up after the attempt was lost is torn down again', async () => {
+      const linking = new Deferred<void>();
+      bindings.connect.mockReturnValueOnce(linking.promise);
+      const connecting = peripheral.connect();
+      session.disconnected.emit('cleanup');
+      await expect(connecting).rejects.toBeInstanceOf(DisconnectedError);
+
+      linking.resolve();
+      await flushPromises();
+
+      expect(bindings.disconnect).toHaveBeenCalledTimes(1);
+      expect(bindings.disconnect).toHaveBeenCalledWith(ID);
+      expect(peripheral.state).toBe('disconnected');
+    });
+
+    test('a synchronous throw of the bindings becomes a rejection with state "error"', async () => {
+      const failure = new Error('bad options');
+      bindings.connect.mockImplementationOnce(() => {
+        throw failure;
+      });
+
+      const connecting = peripheral.connect();
+
+      await expect(connecting).rejects.toBe(failure);
+      expect(peripheral.state).toBe('error');
+
+      await peripheral.connect();
+      expect(peripheral.state).toBe('connected');
+    });
+
     test('an unsolicited link reported by the bindings marks the peripheral connected', () => {
       session.connected.emit();
 
@@ -220,6 +258,7 @@ describe('Peripheral', () => {
       const connecting = peripheral.connect();
 
       peripheral.cancelConnect();
+      expect(peripheral.state).toBe('disconnected');
 
       await expect(connecting).rejects.toBeInstanceOf(ConnectionCancelledError);
       await expect(connecting).rejects.toThrow('connection canceled!');
@@ -250,39 +289,51 @@ describe('Peripheral', () => {
       expect(peripheral.state).toBe('connected');
     });
 
-    // cancelConnect() rejects the attempt but `pendingConnect` is only cleared a
-    // microtask later, so a connect() issued in the same tick is handed the
-    // attempt that was just cancelled.
-    test('[BUG] connect() right after cancelConnect() starts a fresh attempt', async () => {
+    test('connect() right after cancelConnect() starts a fresh attempt', async () => {
       bindings.connect.mockReturnValueOnce(new Deferred<void>().promise);
       const cancelled = peripheral.connect();
-      cancelled.catch(() => {});
 
       peripheral.cancelConnect();
       const retry = peripheral.connect();
-      retry.catch(() => {});
 
+      expect(retry).not.toBe(cancelled);
       await expect(cancelled).rejects.toBeInstanceOf(ConnectionCancelledError);
       await expect(retry).resolves.toBeUndefined();
       expect(bindings.connect).toHaveBeenCalledTimes(2);
+      expect(peripheral.state).toBe('connected');
+    });
+
+    test('the late failure of a cancelled attempt does not disturb the peripheral', async () => {
+      const linking = new Deferred<void>();
+      bindings.connect.mockReturnValueOnce(linking.promise);
+      const cancelled = peripheral.connect();
+      peripheral.cancelConnect();
+      await expect(cancelled).rejects.toBeInstanceOf(ConnectionCancelledError);
+      await peripheral.connect();
+
+      linking.reject(new Error('cancelled by controller'));
+      await flushPromises();
+
+      expect(peripheral.state).toBe('connected');
+      expect(bindings.disconnect).not.toHaveBeenCalled();
     });
 
     // The binding is allowed to lose the race: the link may come up although
-    // cancelConnect() was called. The peripheral then reports 'disconnected'
-    // while the binding holds a live link nobody will ever tear down.
-    test('[BUG] a connect that completes despite the cancellation does not leave an orphaned link', async () => {
-      const pending = new Deferred<void>();
-      bindings.connect.mockReturnValueOnce(pending.promise);
+    // cancelConnect() was called. Nobody is waiting for it any more.
+    test('a link that comes up despite the cancellation is torn down again', async () => {
+      const linking = new Deferred<void>();
+      bindings.connect.mockReturnValueOnce(linking.promise);
       const connecting = peripheral.connect();
 
       peripheral.cancelConnect();
       await expect(connecting).rejects.toBeInstanceOf(ConnectionCancelledError);
-      pending.resolve();
+      expect(bindings.disconnect).not.toHaveBeenCalled();
+      linking.resolve();
       await flushPromises();
 
-      const linkIsTracked = peripheral.state === 'connected';
-      const linkWasDropped = bindings.disconnect.mock.calls.length > 0;
-      expect(linkIsTracked || linkWasDropped).toBe(true);
+      expect(bindings.disconnect).toHaveBeenCalledTimes(1);
+      expect(bindings.disconnect).toHaveBeenCalledWith(ID);
+      expect(peripheral.state).toBe('disconnected');
     });
   });
 
@@ -349,21 +400,40 @@ describe('Peripheral', () => {
       expect(bindings.connect).toHaveBeenCalledTimes(2);
     });
 
-    // connect() does not look at 'disconnecting'. It flips the state to
-    // 'connecting', so when the awaited disconnect report arrives the peripheral
-    // believes no link ever existed and swallows the onDisconnect notification.
-    test('[BUG] connect() while disconnecting does not swallow the onDisconnect notification', async () => {
+    test('connect() while disconnecting waits for the link to go down, then connects afresh', async () => {
       await connect();
       const onDisconnect = jest.fn();
       peripheral.onDisconnect(onDisconnect);
       const disconnecting = peripheral.disconnect();
-      bindings.connect.mockReturnValueOnce(new Deferred<void>().promise);
 
-      peripheral.connect().catch(() => {});
+      const reconnecting = peripheral.connect({ mtu: 100 });
+      await flushPromises();
+      expect(bindings.connect).toHaveBeenCalledTimes(1);
+      expect(peripheral.state).toBe('disconnecting');
+
       session.disconnected.emit('remote');
       await disconnecting;
+      await expect(reconnecting).resolves.toBeUndefined();
 
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
       expect(onDisconnect).toHaveBeenCalledWith('remote');
+      expect(bindings.disconnect).toHaveBeenCalledTimes(1);
+      expect(bindings.connect).toHaveBeenCalledTimes(2);
+      expect(bindings.connect).toHaveBeenLastCalledWith(ID, { mtu: 100 });
+      expect(peripheral.state).toBe('connected');
+    });
+
+    test('several connect() calls made while disconnecting share the new attempt', async () => {
+      await connect();
+      const disconnecting = peripheral.disconnect();
+
+      const first = peripheral.connect();
+      const second = peripheral.connect();
+      session.disconnected.emit('remote');
+      await disconnecting;
+      await Promise.all([first, second]);
+
+      expect(bindings.connect).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -398,6 +468,16 @@ describe('Peripheral', () => {
 
       expect(listener).not.toHaveBeenCalled();
     });
+  });
+
+  test('the negotiated mtu is forgotten when the link goes down', async () => {
+    await connect();
+    session.mtuChanged.emit(247);
+    expect(peripheral.mtu).toBe(247);
+
+    session.disconnected.emit('remote');
+
+    expect(peripheral.mtu).toBeNull();
   });
 
   describe('guard: operations in flight when the link drops', () => {
@@ -452,6 +532,16 @@ describe('Peripheral', () => {
         ID, DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption);
     });
 
+    test('null means "use the default", like undefined', async () => {
+      await peripheral.pair(null, null);
+      await peripheral.pair(DevicePairingKinds.ProvidePin, null);
+
+      expect(bindings.pair!.mock.calls).toEqual([
+        [ID, DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption],
+        [ID, DevicePairingKinds.ProvidePin, DevicePairingProtectionLevel.Encryption]
+      ]);
+    });
+
     test('forwards an explicit kind bitmask and protection level', async () => {
       const kind = DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin;
 
@@ -472,8 +562,7 @@ describe('Peripheral', () => {
       ['too large', 0x100000000],
       ['NaN', NaN],
       ['Infinity', Infinity],
-      ['a string', '8'],
-      ['null', null]
+      ['a string', '8']
     ])('rejects a kind that is %s', async (_label, kind) => {
       await expect(peripheral.pair(kind as any)).rejects.toThrow(
         new TypeError('pair() kind must be a finite uint32 DevicePairingKinds bitmask'));
@@ -699,8 +788,10 @@ describe('Peripheral', () => {
       ['an array', [1, 2]],
       ['a Uint8Array', new Uint8Array([1])],
       ['undefined', undefined]
-    ])('writeHandle refuses %s', (_label, data) => {
-      expect(() => peripheral.writeHandle(1, data as any)).toThrow(new TypeError('data must be a Buffer'));
+    ])('writeHandle rejects %s with a TypeError', async (_label, data) => {
+      const writing = peripheral.writeHandle(1, data as any);
+
+      await expect(writing).rejects.toThrow(new TypeError('data must be a Buffer'));
       expect(bindings.writeHandle).not.toHaveBeenCalled();
     });
 
@@ -728,6 +819,7 @@ describe('Peripheral', () => {
         address: 'aa:bb:cc:dd:ee:ff',
         addressType: 'public',
         connectable: true,
+        scannable: true,
         advertisement: { localName: 'device', serviceUuids: [], serviceData: [] },
         rssi: -60,
         mtu: 185,

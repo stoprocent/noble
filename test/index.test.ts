@@ -29,7 +29,7 @@ describe('public exports', () => {
   });
 
   test('exposes DevicePairingProtectionLevel constants', () => {
-    expect(api.DevicePairingProtectionLevel).toEqual({
+    expect(api.DevicePairingProtectionLevel).toStrictEqual({
       Default: 0,
       None: 1,
       Encryption: 2,
@@ -38,7 +38,7 @@ describe('public exports', () => {
   });
 
   test('exposes DevicePairingKinds constants', () => {
-    expect(api.DevicePairingKinds).toEqual({
+    expect(api.DevicePairingKinds).toStrictEqual({
       None: 0,
       ConfirmOnly: 0x08,
       DisplayPin: 0x10,
@@ -47,11 +47,6 @@ describe('public exports', () => {
       ProvidePassword: 0x80,
       ConfirmPassword: 0x100
     });
-  });
-
-  test('the pairing tables equal the ones of the previous implementation exactly', () => {
-    expect(api.DevicePairingKinds).toStrictEqual(require('../lib/pairing-kinds'));
-    expect(api.DevicePairingProtectionLevel).toStrictEqual(require('../lib/pairing-protection-level'));
   });
 
   test('exposes the model classes', () => {

@@ -74,23 +74,22 @@ export class Characteristic {
 
   /**
    * Subscribes and yields every notified value until the consumer stops
-   * iterating or {@link unsubscribe} is called. Leaving the loop unsubscribes
-   * again, unless notifications were already enabled before or another
-   * `notifications()` loop is still running on this characteristic.
+   * iterating or {@link unsubscribe} is called. Leaving the last running loop
+   * unsubscribes again, unless {@link subscribe} was called explicitly.
    * Throws {@link DisconnectedError} if the link drops mid-stream.
    */
   async * notifications (): AsyncGenerator<Buffer, void, void> {
-    const wasNotifying = this.isNotifying;
     const stream = this.session.openStream(this.serviceUuid, this.uuid);
     const stopListening = this.onNotification(data => stream.push(data));
 
     try {
-      await this.subscribe();
+      await this.session.setNotifying(this.serviceUuid, this.uuid, true, false);
       yield * stream;
     } finally {
       stopListening();
       const remaining = this.session.closeStream(this.serviceUuid, this.uuid, stream);
-      if (!wasNotifying && remaining === 0 && this.isNotifying) {
+      const explicit = this.session.isExplicitlySubscribed(this.serviceUuid, this.uuid);
+      if (!explicit && remaining === 0 && this.isNotifying) {
         await this.unsubscribe().catch(() => {
           // The link may already be gone; there is nothing left to undo.
         });

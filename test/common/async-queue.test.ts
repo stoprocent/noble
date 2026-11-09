@@ -110,17 +110,30 @@ describe('AsyncQueue', () => {
     expect(seen).toEqual([1, 2]);
   });
 
-  // The queue keeps a single waiter slot. Nothing in the library iterates one
-  // queue from two places, but the type (AsyncIterableIterator) allows it.
-  test('[BUG] two concurrent next() calls are both served', async () => {
+  test('several concurrent next() calls are served in the order they were made', async () => {
     const queue = new AsyncQueue<number>();
     const first = queue.next();
     const second = queue.next();
+    const third = queue.next();
 
     queue.push(1);
     queue.push(2);
+    queue.end();
 
-    expect(await isPending(first)).toBe(false);
-    expect(await isPending(second)).toBe(false);
+    await expect(first).resolves.toEqual({ value: 1, done: false });
+    await expect(second).resolves.toEqual({ value: 2, done: false });
+    await expect(third).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  test('end(error) rejects every waiting next()', async () => {
+    const queue = new AsyncQueue<number>();
+    const first = queue.next();
+    const second = queue.next();
+    const error = new Error('link lost');
+
+    queue.end(error);
+
+    await expect(first).rejects.toBe(error);
+    await expect(second).rejects.toBe(error);
   });
 });

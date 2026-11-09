@@ -677,15 +677,27 @@ describe('NativeBindings', () => {
       await expect(connecting).resolves.toBeUndefined();
     });
 
-    // The rejection on disconnect compares the raw peripheral id while the
-    // completion matching normalises it, so the two disagree for an id that
-    // was not passed in the addon's own spelling.
-    test('[BUG] a disconnect rejects pending requests issued with a dashed, uppercase peripheral id', async () => {
+    test('a disconnect rejects pending requests issued with a dashed, uppercase peripheral id', async () => {
       const reading = bindings.read('0A1B2C3D-0000-1111-2222-333344445555', SERVICE, CHARACTERISTIC);
 
       emit('disconnect', '0a1b2c3d000011112222333344445555');
 
-      expect(await isPending(reading)).toBe(false);
+      await expect(reading).rejects.toBeInstanceOf(DisconnectedError);
+    });
+
+    // cancelConnect() only forwards to the addon. The WinRT addon answers a
+    // cancelled attempt with no event at all, so the abandoned request stays at
+    // the head of the 'connect' queue and swallows the completion of the next
+    // attempt, whose own request then never settles.
+    test('the completion of a new connect is not consumed by an attempt that was cancelled', async () => {
+      const cancelled = bindings.connect(ID);
+      cancelled.catch(() => {});
+      bindings.cancelConnect(ID);
+
+      const retry = bindings.connect(ID);
+      emit('connect', ID, null);
+
+      expect(await isPending(retry)).toBe(false);
     });
   });
 

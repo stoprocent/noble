@@ -105,8 +105,10 @@ describe('Characteristic', () => {
       ['a Uint16Array', new Uint16Array([1])],
       ['undefined', undefined],
       ['null', null]
-    ])('refuses %s', (_label, data) => {
-      expect(() => characteristic.write(data as any)).toThrow(new TypeError('data must be a Buffer or Uint8Array'));
+    ])('rejects %s with a TypeError', async (_label, data) => {
+      const writing = characteristic.write(data as any);
+
+      await expect(writing).rejects.toThrow(new TypeError('data must be a Buffer or Uint8Array'));
       expect(bindings.write).not.toHaveBeenCalled();
     });
 
@@ -195,10 +197,38 @@ describe('Characteristic', () => {
       bindings.notify.mockReturnValueOnce(new Deferred<void>().promise);
 
       const subscribing = characteristic.subscribe();
+      await flushPromises();
+      expect(bindings.notify).toHaveBeenCalledTimes(1);
       session.disconnected.emit('remote');
 
       await expect(subscribing).rejects.toBeInstanceOf(DisconnectedError);
       expect(characteristic.isNotifying).toBe(false);
+    });
+
+    // The request goes out synchronously, so it is guarded against a link
+    // loss reported right after subscribe() returns.
+    test('a link drop right after subscribe() was called rejects it', async () => {
+      bindings.notify.mockReturnValueOnce(new Deferred<void>().promise);
+
+      const subscribing = characteristic.subscribe();
+      expect(bindings.notify).toHaveBeenCalledTimes(1);
+      session.disconnected.emit('remote');
+
+      await expect(subscribing).rejects.toBeInstanceOf(DisconnectedError);
+      expect(characteristic.isNotifying).toBe(false);
+    });
+
+    test('a request that was in flight when the link dropped does not block the next one', async () => {
+      bindings.notify.mockReturnValueOnce(new Deferred<void>().promise);
+      const lost = characteristic.subscribe();
+      await flushPromises();
+      session.disconnected.emit('remote');
+      await expect(lost).rejects.toBeInstanceOf(DisconnectedError);
+
+      await characteristic.subscribe();
+
+      expect(bindings.notify).toHaveBeenCalledTimes(2);
+      expect(characteristic.isNotifying).toBe(true);
     });
 
     test('a disconnect resets the notifying state, so subscribing again reaches the bindings', async () => {
@@ -230,18 +260,67 @@ describe('Characteristic', () => {
       expect(bindings.notify).toHaveBeenCalledTimes(1);
     });
 
-    // Idempotence is decided from the confirmed state only, so a second call
-    // made before the first one is confirmed writes the CCCD a second time.
-    test('[BUG] concurrent subscribe() calls enable notifications once', async () => {
+    test('concurrent subscribe() calls share one request', async () => {
       const pending = new Deferred<void>();
-      bindings.notify.mockReturnValue(pending.promise);
+      bindings.notify.mockReturnValueOnce(pending.promise);
 
       const first = characteristic.subscribe();
       const second = characteristic.subscribe();
+      await flushPromises();
       pending.resolve();
       await Promise.all([first, second]);
 
       expect(bindings.notify).toHaveBeenCalledTimes(1);
+      expect(characteristic.isNotifying).toBe(true);
+    });
+
+    test('concurrent subscribe() calls through different objects share one request', async () => {
+      const rediscovered = new Characteristic(session, SERVICE, UUID, ['notify']);
+
+      await Promise.all([characteristic.subscribe(), rediscovered.subscribe()]);
+
+      expect(bindings.notify).toHaveBeenCalledTimes(1);
+    });
+
+    test('concurrent unsubscribe() calls share one request', async () => {
+      await characteristic.subscribe();
+
+      await Promise.all([characteristic.unsubscribe(), characteristic.unsubscribe()]);
+
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false]);
+    });
+
+    test('all callers of a shared request see its failure', async () => {
+      bindings.notify.mockRejectedValueOnce(new Error('cccd write failed'));
+
+      const first = characteristic.subscribe();
+      const second = characteristic.subscribe();
+
+      await expect(first).rejects.toThrow('cccd write failed');
+      await expect(second).rejects.toThrow('cccd write failed');
+    });
+
+    test('an unsubscribe() issued while a subscribe() is in flight is applied after it', async () => {
+      const enabling = new Deferred<void>();
+      bindings.notify.mockReturnValueOnce(enabling.promise);
+
+      const subscribing = characteristic.subscribe();
+      const unsubscribing = characteristic.unsubscribe();
+      await flushPromises();
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true]);
+
+      enabling.resolve();
+      await Promise.all([subscribing, unsubscribing]);
+
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false]);
+      expect(characteristic.isNotifying).toBe(false);
+    });
+
+    test('subscribe, unsubscribe, subscribe issued together end up subscribed', async () => {
+      await Promise.all([characteristic.subscribe(), characteristic.unsubscribe(), characteristic.subscribe()]);
+
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false, true]);
+      expect(characteristic.isNotifying).toBe(true);
     });
   });
 
@@ -430,11 +509,10 @@ describe('Characteristic', () => {
       await stream.return();
     });
 
-    test('with two streams, notifications stay on until the last one stops', async () => {
+    test('with two streams started together, notifications stay on until the last one stops', async () => {
       const a = characteristic.notifications();
       const b = characteristic.notifications();
       const firstA = a.next();
-      await flushPromises();
       const firstB = b.next();
       await flushPromises();
       notify(Buffer.from([1]));
@@ -449,6 +527,88 @@ describe('Characteristic', () => {
       expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false]);
     });
 
+    // "Already enabled before the loop started" is read from the notifying
+    // state, which cannot tell an explicit subscribe() from another stream's
+    // subscription. A stream opened while an earlier one is running therefore
+    // believes the subscription is not its to undo; when the earlier one has
+    // left first, nobody switches the notifications off.
+    test('with a second stream started later, notifications are switched off when the last one stops', async () => {
+      const a = characteristic.notifications();
+      const firstA = a.next();
+      await flushPromises();
+      const b = characteristic.notifications();
+      const firstB = b.next();
+      await flushPromises();
+      notify(Buffer.from([1]));
+      await firstA;
+      await firstB;
+
+      await a.return();
+      expect(characteristic.isNotifying).toBe(true);
+      await b.return();
+
+      expect(characteristic.isNotifying).toBe(false);
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false]);
+    });
+
+    test('leaving a stream keeps a subscription the caller made explicitly beforehand', async () => {
+      await characteristic.subscribe();
+      const stream = characteristic.notifications();
+      const first = stream.next();
+      await flushPromises();
+      notify(Buffer.from([1]));
+      await first;
+
+      await stream.return();
+
+      expect(characteristic.isNotifying).toBe(true);
+      expect(bindings.notify).toHaveBeenCalledTimes(1);
+    });
+
+    test('unsubscribe() ends every stream on the characteristic', async () => {
+      const a = characteristic.notifications();
+      const b = characteristic.notifications();
+      const firstA = a.next();
+      const firstB = b.next();
+      await flushPromises();
+
+      await characteristic.unsubscribe();
+
+      await expect(firstA).resolves.toEqual({ value: undefined, done: true });
+      await expect(firstB).resolves.toEqual({ value: undefined, done: true });
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, false]);
+    });
+
+    test('a disconnect ends every stream with DisconnectedError', async () => {
+      const a = characteristic.notifications();
+      const b = new Characteristic(session, SERVICE, '2a1a', ['notify']).notifications();
+      const firstA = a.next();
+      const firstB = b.next();
+      await flushPromises();
+
+      session.disconnected.emit('remote');
+
+      await expect(firstA).rejects.toBeInstanceOf(DisconnectedError);
+      await expect(firstB).rejects.toBeInstanceOf(DisconnectedError);
+    });
+
+    test('a stream started after a reconnect subscribes again', async () => {
+      const lost = characteristic.notifications();
+      const first = lost.next();
+      await flushPromises();
+      session.disconnected.emit('remote');
+      await expect(first).rejects.toBeInstanceOf(DisconnectedError);
+
+      const stream = characteristic.notifications();
+      const next = stream.next();
+      await flushPromises();
+      notify(Buffer.from([7]));
+
+      await expect(next).resolves.toEqual({ value: Buffer.from([7]), done: false });
+      expect(bindings.notify.mock.calls.map(call => call[3])).toEqual([true, true]);
+      await stream.return();
+    });
+
     test('a failing unsubscribe on the way out does not surface to the consumer', async () => {
       const stream = characteristic.notifications();
       const first = stream.next();
@@ -460,9 +620,8 @@ describe('Characteristic', () => {
       await expect(stream.return()).resolves.toEqual({ value: undefined, done: true });
     });
 
-    // The set of live streams is kept per Characteristic object while the
-    // notifying state lives in the session. Discovering characteristics again
-    // creates new objects for the same characteristic, and the two disagree.
+    // Discovering characteristics again creates new objects for the same
+    // characteristic; streams and notifying state are shared through the session.
     describe('with a second object for the same characteristic (after a re-discovery)', () => {
       let rediscovered: Characteristic;
 
@@ -470,7 +629,7 @@ describe('Characteristic', () => {
         rediscovered = new Characteristic(session, SERVICE, UUID, ['read', 'notify']);
       });
 
-      test('[BUG] unsubscribe() through the other object ends the stream', async () => {
+      test('unsubscribe() through the other object ends the stream', async () => {
         const stream = characteristic.notifications();
         const first = stream.next();
         await flushPromises();
@@ -478,10 +637,10 @@ describe('Characteristic', () => {
         await rediscovered.unsubscribe();
 
         expect(bindings.notify).toHaveBeenLastCalledWith(ID, SERVICE, UUID, false);
-        expect(await isPending(first)).toBe(false);
+        await expect(first).resolves.toEqual({ value: undefined, done: true });
       });
 
-      test('[BUG] leaving one stream does not switch notifications off under the other object\'s stream', async () => {
+      test('leaving one stream does not switch notifications off under the other object\'s stream', async () => {
         const mine = characteristic.notifications();
         const theirs = rediscovered.notifications();
         const myFirst = mine.next();
@@ -495,7 +654,9 @@ describe('Characteristic', () => {
 
         expect(bindings.notify).not.toHaveBeenCalledWith(ID, SERVICE, UUID, false);
         expect(rediscovered.isNotifying).toBe(true);
+
         await theirs.return();
+        expect(bindings.notify).toHaveBeenLastCalledWith(ID, SERVICE, UUID, false);
       });
     });
   });

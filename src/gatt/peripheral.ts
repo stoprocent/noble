@@ -119,7 +119,7 @@ export class Peripheral {
     }
     // A link that comes up after the attempt was abandoned must not be left dangling.
     linking.then(() => {
-      if (!isCurrent() && this.currentState !== 'connected') {
+      if (!isCurrent() && this.pendingConnect === null && this.currentState !== 'connected') {
         bindings.disconnect(peripheralId);
       }
     }, () => {});

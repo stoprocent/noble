@@ -1,7 +1,7 @@
 import { resolve } from 'path';
 
 import { Deferred } from '../common/deferred';
-import { DisconnectedError, NobleError } from '../common/errors';
+import { ConnectionCancelledError, DisconnectedError, NobleError } from '../common/errors';
 import type { AdapterState, AddressType, Advertisement, ConnectOptions } from '../types';
 import type { Bindings, BindingsDelegate, CharacteristicInfo } from './bindings';
 
@@ -96,6 +96,12 @@ export class NativeBindings implements Bindings {
   }
 
   cancelConnect (id: string): void {
+    // The addons do not report a completion for an attempt that was cancelled.
+    const requestKey = completionKey(['connect', id]);
+    for (const request of this.pending.get(requestKey) ?? []) {
+      request.deferred.reject(new ConnectionCancelledError());
+    }
+    this.pending.delete(requestKey);
     this.native.cancelConnect(id);
   }
 

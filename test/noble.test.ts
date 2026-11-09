@@ -834,6 +834,65 @@ describe('Noble', () => {
     });
   });
 
+  describe('discover() on bindings that do not report onScanStart', () => {
+    beforeEach(() => {
+      powerOn();
+      bindings.reportScanEvents = false;
+    });
+
+    test('a resolved startScanning() counts as scanning: the scan is started once and peripherals are yielded', async () => {
+      const iterator = noble.discover();
+      const next = iterator.next();
+      await flushPromises(200);
+
+      expect(bindings.startScanning).toHaveBeenCalledTimes(1);
+
+      bindings.delegate.onDiscover(discovery());
+      await expect(next).resolves.toMatchObject({ done: false, value: { id: ID } });
+    });
+
+    test('leaving the loop stops the scan', async () => {
+      const iterator = noble.discover();
+      const next = iterator.next();
+      await flushPromises();
+      bindings.delegate.onDiscover(discovery());
+      await next;
+
+      await iterator.return();
+
+      expect(bindings.stopScanning).toHaveBeenCalledTimes(1);
+    });
+
+    test('an unsolicited scan stop still restarts the scan, once', async () => {
+      const iterator = noble.discover();
+      const next = iterator.next();
+      await flushPromises();
+
+      bindings.delegate.onScanStop();
+      await flushPromises(200);
+
+      expect(bindings.startScanning).toHaveBeenCalledTimes(2);
+      bindings.delegate.onDiscover(discovery());
+      await expect(next).resolves.toMatchObject({ done: false });
+    });
+
+    test('a scan stop reported while the start was still pending is not mistaken for a running scan', async () => {
+      const starting = new Deferred<void>();
+      bindings.startScanning.mockReturnValueOnce(starting.promise);
+      const iterator = noble.discover();
+      const next = iterator.next();
+      await flushPromises();
+
+      bindings.delegate.onScanStop();
+      starting.resolve();
+      await flushPromises(200);
+
+      expect(bindings.startScanning).toHaveBeenCalledTimes(2);
+      bindings.delegate.onDiscover(discovery());
+      await expect(next).resolves.toMatchObject({ done: false });
+    });
+  });
+
   describe('connect', () => {
     test('passes a peripheral id straight through', async () => {
       const options = { mtu: 185 };
@@ -1001,6 +1060,13 @@ describe('Noble', () => {
 
       expect(bindings.pair).toHaveBeenCalledWith(
         ID, DevicePairingKinds.ProvidePin, DevicePairingProtectionLevel.EncryptionAndAuthentication);
+    });
+
+    test('null kind and protection level mean the defaults', async () => {
+      await noble.pair(ID, null, null);
+
+      expect(bindings.pair).toHaveBeenCalledWith(
+        ID, DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption);
     });
 
     test('rejects invalid arguments', async () => {
@@ -1180,27 +1246,27 @@ describe('Noble', () => {
       expect(peripheral.state).toBe('disconnected');
     });
 
-    test('listeners see the teardown before the state change', async () => {
+    test('the teardown is reported before the state change, with the new state already readable', async () => {
       const peripheral = discover();
       await peripheral.connect();
       const order: string[] = [];
-      peripheral.onDisconnect(() => order.push('disconnect'));
+      peripheral.onDisconnect(() => order.push(`disconnect while ${noble.state}`));
       noble.onStateChange(state => order.push(state));
 
       bindings.delegate.onStateChange('poweredOff');
 
-      expect(order).toEqual(['disconnect', 'poweredOff']);
+      expect(order).toEqual(['disconnect while poweredOff', 'poweredOff']);
     });
 
-    test('known peripherals are forgotten: a later discovery creates a new peripheral and reports it', () => {
+    test('peripherals stay known: a later discovery reports the same object again', () => {
       const before = discover();
 
       bindings.delegate.onStateChange('poweredOff');
       bindings.delegate.onStateChange('poweredOn');
-      const after = discover();
+      const after = discover({ rssi: -30 });
 
-      expect(after).not.toBe(before);
-      expect(after.id).toBe(before.id);
+      expect(after).toBe(before);
+      expect(before.rssi).toBe(-30);
     });
 
     test('nothing is torn down by a change between two states that are not poweredOn', async () => {
@@ -1224,11 +1290,6 @@ describe('Noble', () => {
       expect(peripheral.state).toBe('connected');
     });
 
-    // The teardown also forgets the peripheral, but the application still holds
-    // the object and it still drives the bindings. Once the adapter is back, a
-    // reconnect through that object succeeds while everything the bindings
-    // report for the link is routed nowhere ("unknown peripheral ..."): the
-    // object never learns about the disconnect and disconnect() never resolves.
     describe('a Peripheral the application kept across the power cycle', () => {
       let peripheral: Peripheral;
       let warnings: jest.Mock;
@@ -1248,7 +1309,7 @@ describe('Noble', () => {
         expect(peripheral.state).toBe('connected');
       });
 
-      test('[BUG] still learns about the loss of its link', () => {
+      test('still learns about the loss of its link', () => {
         const onDisconnect = jest.fn();
         peripheral.onDisconnect(onDisconnect);
 
@@ -1259,14 +1320,79 @@ describe('Noble', () => {
         expect(peripheral.state).toBe('disconnected');
       });
 
-      test('[BUG] disconnect() still resolves', async () => {
+      test('disconnect() still resolves', async () => {
         const disconnecting = peripheral.disconnect();
         expect(bindings.disconnect).toHaveBeenCalledWith(ID);
 
         bindings.delegate.onDisconnect(ID, 0x16);
 
-        expect(await isPending(disconnecting)).toBe(false);
+        await expect(disconnecting).resolves.toBeUndefined();
       });
+
+      test('is the peripheral noble.connect() resolves with', async () => {
+        bindings.delegate.onDisconnect(ID, 0x08);
+
+        await expect(noble.connect(ID)).resolves.toBe(peripheral);
+      });
+    });
+  });
+
+  describe('stop()', () => {
+    beforeEach(() => {
+      powerOn();
+    });
+
+    test('connected peripherals are disconnected with reason "stopped"', async () => {
+      const peripheral = discover();
+      await peripheral.connect();
+      const onDisconnect = jest.fn();
+      peripheral.onDisconnect(onDisconnect);
+
+      noble.stop();
+
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
+      expect(onDisconnect).toHaveBeenCalledWith('stopped');
+      expect(peripheral.state).toBe('disconnected');
+    });
+
+    test('operations and connection attempts in flight reject with DisconnectedError("stopped")', async () => {
+      const connected = discover();
+      await connected.connect();
+      bindings.readHandle.mockReturnValueOnce(new Deferred<Buffer>().promise);
+      const reading = connected.readHandle(1);
+      const other = discover({ id: '112233445566', address: '11:22:33:44:55:66' });
+      bindings.connect.mockReturnValueOnce(new Deferred<void>().promise);
+      const connecting = other.connect();
+
+      noble.stop();
+
+      await expect(reading).rejects.toMatchObject({ name: 'DisconnectedError', reason: 'stopped' });
+      await expect(connecting).rejects.toMatchObject({ name: 'DisconnectedError', reason: 'stopped' });
+      expect(other.state).toBe('disconnected');
+    });
+
+    test('the bindings are stopped before the teardown is reported', async () => {
+      const peripheral = discover();
+      await peripheral.connect();
+      let stoppedWhenReported = false;
+      peripheral.onDisconnect(() => {
+        stoppedWhenReported = bindings.stop.mock.calls.length === 1;
+      });
+
+      noble.stop();
+
+      expect(stoppedWhenReported).toBe(true);
+    });
+
+    test('peripherals without a link are left alone, and stay known', () => {
+      const peripheral = discover();
+      const onDisconnect = jest.fn();
+      peripheral.onDisconnect(onDisconnect);
+
+      noble.stop();
+
+      expect(onDisconnect).not.toHaveBeenCalled();
+      expect(discover()).toBe(peripheral);
     });
   });
 

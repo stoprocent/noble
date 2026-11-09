@@ -71,8 +71,10 @@ describe('Descriptor', () => {
       ['an array', [1, 0]],
       ['a Uint8Array', new Uint8Array([1, 0])],
       ['undefined', undefined]
-    ])('refuses %s', (_label, data) => {
-      expect(() => descriptor.writeValue(data as any)).toThrow(new TypeError('data must be a Buffer'));
+    ])('rejects %s with a TypeError', async (_label, data) => {
+      const writing = descriptor.writeValue(data as any);
+
+      await expect(writing).rejects.toThrow(new TypeError('data must be a Buffer'));
       expect(bindings.writeValue).not.toHaveBeenCalled();
     });
 

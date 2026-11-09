@@ -33,6 +33,11 @@ export class PeripheralSession {
   private readonly notifying = new Set<string>();
   /** Notification state changes in flight, so concurrent callers share one request. */
   private readonly notifyRequests = new Map<string, { notify: boolean; promise: Promise<void> }>();
+  /** Characteristics the application subscribed to itself, as opposed to through a stream. */
+  private readonly explicitlySubscribed = new Set<string>();
+  private lastDisconnectReason: DisconnectReason = 'unknown';
+  /** Counts link losses, so queued work can tell it outlived its link. */
+  private linkEpoch = 0;
   /** Live `notifications()` iterations per characteristic. */
   private readonly streams = new Map<string, Set<AsyncQueue<Buffer>>>();
 
@@ -42,6 +47,9 @@ export class PeripheralSession {
   ) {
     // Subscriptions do not survive a link loss.
     this.disconnected.subscribe(reason => {
+      this.lastDisconnectReason = reason;
+      this.linkEpoch += 1;
+      this.explicitlySubscribed.clear();
       this.notifying.clear();
       this.notifyRequests.clear();
       for (const stream of [...this.streams.values()].flatMap(streams => [...streams])) {
@@ -92,10 +100,20 @@ export class PeripheralSession {
 
   /**
    * Switches notifications for a characteristic on or off. A no-op when
-   * already in that state; concurrent calls for the same state share one request.
+   * already in that state; concurrent calls for the same state share one
+   * request, and opposite requests are applied in the order they were made.
+   *
+   * `explicit` marks a subscription the application asked for itself, which
+   * a finishing `notifications()` loop must leave in place.
    */
-  setNotifying (serviceUuid: string, characteristicUuid: string, notify: boolean): Promise<void> {
+  setNotifying (serviceUuid: string, characteristicUuid: string, notify: boolean, explicit = true): Promise<void> {
     const key = characteristicKey(serviceUuid, characteristicUuid);
+    if (!notify) {
+      this.explicitlySubscribed.delete(key);
+    } else if (explicit) {
+      this.explicitlySubscribed.add(key);
+    }
+
     const inFlight = this.notifyRequests.get(key);
     if (inFlight?.notify === notify) {
       return inFlight.promise;
@@ -105,9 +123,12 @@ export class PeripheralSession {
     }
 
     const request = { notify, promise: Promise.resolve() };
-    request.promise = (async () => {
-      // Opposite requests are applied in the order they were made.
-      await inFlight?.promise.catch(() => {});
+    const epoch = this.linkEpoch;
+    const apply = async (): Promise<void> => {
+      if (this.linkEpoch !== epoch) {
+        // The link dropped while this request was waiting its turn.
+        throw new DisconnectedError(this.lastDisconnectReason);
+      }
       try {
         await this.guard(this.bindings.notify(this.peripheralId, serviceUuid, characteristicUuid, notify));
       } finally {
@@ -125,9 +146,16 @@ export class PeripheralSession {
         }
         this.streams.delete(key);
       }
-    })();
+    };
+
     this.notifyRequests.set(key, request);
+    request.promise = inFlight ? inFlight.promise.then(apply, apply) : apply();
     return request.promise;
+  }
+
+  /** Whether the application itself asked for the subscription (see {@link setNotifying}). */
+  isExplicitlySubscribed (serviceUuid: string, characteristicUuid: string): boolean {
+    return this.explicitlySubscribed.has(characteristicKey(serviceUuid, characteristicUuid));
   }
 
   /** Opens a queue fed by the characteristic's notifications until {@link closeStream}. */
