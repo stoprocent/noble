@@ -78,6 +78,11 @@ void noble_mac_resolve_strings(void* context, uint64_t requestId, const char* co
 void noble_mac_resolve_characteristics(void* context, uint64_t requestId,
                                        const NobleMacCharacteristic* characteristics, size_t count);
 void noble_mac_reject(void* context, uint64_t requestId, const char* message);
+/* Rejects with an Error that also carries the NSError it stems from, as
+ * `nativeErrorDomain` (string) and `nativeErrorCode` (number). A NULL or empty
+ * `domain` means there is no native error: same as noble_mac_reject(). */
+void noble_mac_reject_native(void* context, uint64_t requestId, const char* message, const char* domain,
+                             int64_t code);
 
 void noble_mac_on_state_change(void* context, const char* state);
 void noble_mac_on_scan_start(void* context, bool filterDuplicates);

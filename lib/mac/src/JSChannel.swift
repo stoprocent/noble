@@ -79,6 +79,20 @@ final class JSChannel {
         noble_mac_reject(context, requestId, pool.string(message))
     }
 
+    /// Rejects with the description of `error` and, on the JavaScript `Error`,
+    /// its domain and code as `nativeErrorDomain` / `nativeErrorCode`.
+    func reject(_ requestId: UInt64, nativeError error: Error) {
+        guard isOpen else {
+            return
+        }
+        let native = error as NSError
+        let pool = CAllocations()
+        defer { pool.release() }
+        noble_mac_reject_native(
+            context, requestId, pool.string(native.localizedDescription), pool.string(native.domain),
+            Int64(native.code))
+    }
+
     // MARK: Notifications
 
     func stateChanged(_ state: String) {

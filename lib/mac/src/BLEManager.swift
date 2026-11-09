@@ -262,6 +262,19 @@ final class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
     }
 
+    /// Rejects everything waiting on `session` because of a connection-level
+    /// error: with the `NSError` details when CoreBluetooth gave one, with
+    /// `fallback` otherwise.
+    private func rejectAll(_ session: PeripheralSession, error: Error?, fallback: String) {
+        guard let error = error else {
+            rejectAll(session, fallback)
+            return
+        }
+        for requestId in session.pending.removeAll() {
+            js.reject(requestId, nativeError: error)
+        }
+    }
+
     /// Reports the MTU when it changed. CoreBluetooth only exposes the largest
     /// write-without-response payload, which is what noble has always reported here.
     private func reportMTU(_ session: PeripheralSession) {
@@ -515,7 +528,7 @@ final class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
         sessions.removeValue(forKey: id)
         peripheral.delegate = nil
-        rejectAll(session, error?.localizedDescription ?? "connection failed")
+        rejectAll(session, error: error, fallback: "connection failed")
     }
 
     func centralManager(
@@ -534,14 +547,18 @@ final class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         let wasConnected = session.isConnected
         session.isConnected = false
 
-        var message = wasConnected ? "Peripheral \(id) disconnected" : "Connection to peripheral \(id) was cancelled"
-        if let error = error {
-            message = error.localizedDescription
-        }
-        rejectAll(session, message)
+        // A disconnect that arrives before `didConnect` (for example
+        // CBErrorDomain 14, "Peer removed pairing information") ends the
+        // attempt: the waiting connect() is rejected here, not left pending.
+        let fallback = wasConnected ? "Peripheral \(id) disconnected" : "Connection to peripheral \(id) was cancelled"
+        rejectAll(session, error: error, fallback: fallback)
 
         if wasConnected {
-            js.disconnected(id, reason: error?.localizedDescription ?? "unknown")
+            var reason = "unknown"
+            if let error = error {
+                reason = (error as NSError).localizedDescription
+            }
+            js.disconnected(id, reason: reason)
         }
     }
 

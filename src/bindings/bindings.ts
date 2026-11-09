@@ -71,7 +71,13 @@ export interface Bindings {
   cancelConnect (peripheralId: string): void;
   /** Requests a disconnect; completion is reported through `onDisconnect`. */
   disconnect (peripheralId: string): void;
-  pair? (peripheralId: string, kind: number, protectionLevel: number): Promise<void>;
+  /**
+   * `pin`, when given, is a non-empty string answering PIN ceremonies; it is
+   * omitted (not passed as `undefined`) for pairing without a PIN.
+   */
+  pair? (peripheralId: string, kind: number, protectionLevel: number, pin?: string): Promise<void>;
+  /** Whether the platform reports a bond with the peripheral. Absent where pairing state is unavailable. */
+  isPaired? (peripheralId: string): Promise<boolean>;
   updateRssi (peripheralId: string): Promise<number>;
 
   discoverServices (peripheralId: string, serviceUuids: string[]): Promise<string[]>;

@@ -858,6 +858,30 @@ void noble_mac_reject(void* context, uint64_t requestId, const char* message)
     bridgeOf(context).reject(requestId, text.empty() ? std::string("unknown error") : text);
 }
 
+void noble_mac_reject_native(void* context, uint64_t requestId, const char* message, const char* domain,
+                             int64_t code)
+{
+    std::string nativeDomain = copyString(domain);
+    if (nativeDomain.empty())
+    {
+        noble_mac_reject(context, requestId, message);
+        return;
+    }
+    std::string text = copyString(message);
+    if (text.empty())
+    {
+        text = "unknown error";
+    }
+    bridgeOf(context).rejectWith(
+        requestId,
+        [text = std::move(text), nativeDomain = std::move(nativeDomain), code](Napi::Env env) -> Napi::Value {
+            Napi::Object error = Napi::Error::New(env, text).Value();
+            error.Set("nativeErrorDomain", Napi::String::New(env, nativeDomain));
+            error.Set("nativeErrorCode", Napi::Number::New(env, static_cast<double>(code)));
+            return error;
+        });
+}
+
 void noble_mac_on_state_change(void* context, const char* state)
 {
     bridgeOf(context).notify("onStateChange", [state = copyString(state)](Napi::Env env) {

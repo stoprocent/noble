@@ -83,3 +83,30 @@ export const DevicePairingProtectionLevel = {
 } as const;
 export type DevicePairingProtectionLevel =
   typeof DevicePairingProtectionLevel[keyof typeof DevicePairingProtectionLevel];
+
+/**
+ * Options for `pair()`. Only the Windows binding supports pairing.
+ *
+ * Without a `pin`, `kind` defaults to `DevicePairingKinds.ConfirmOnly` and
+ * `protectionLevel` to `DevicePairingProtectionLevel.Encryption`.
+ */
+export interface PairOptions {
+  /**
+   * The ceremonies the caller can handle, as a `DevicePairingKinds` bitmask.
+   * With a `pin` the default becomes
+   * `ConfirmOnly | ProvidePin | ConfirmPinMatch`.
+   */
+  kind?: DevicePairingKinds | null;
+  /**
+   * With a `pin` the default becomes `EncryptionAndAuthentication`, and it is
+   * the only level accepted: PIN pairing is authenticated pairing.
+   */
+  protectionLevel?: DevicePairingProtectionLevel | null;
+  /**
+   * The PIN displayed by, or configured on, the peripheral; a non-empty
+   * string. It answers a `ProvidePin` request, and a `ConfirmPinMatch`
+   * request is accepted only when the PIN Windows presents equals it.
+   * noble never logs the PIN and does not keep it after the pairing attempt.
+   */
+  pin?: string;
+}

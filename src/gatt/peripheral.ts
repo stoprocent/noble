@@ -9,6 +9,7 @@ import {
   type Advertisement,
   type ConnectOptions,
   type DisconnectReason,
+  type PairOptions,
   type PeripheralState
 } from '../types';
 import type { Characteristic } from './characteristic';
@@ -186,15 +187,45 @@ export class Peripheral {
    * `DevicePairingKinds.ConfirmOnly` and `protectionLevel` to
    * `DevicePairingProtectionLevel.Encryption`.
    *
+   * Pass {@link PairOptions} with a `pin` for authenticated PIN pairing: the
+   * defaults then become `ConfirmOnly | ProvidePin | ConfirmPinMatch` and
+   * `EncryptionAndAuthentication`.
+   *
    * Only the Windows binding implements pairing; elsewhere this rejects with
    * {@link NotSupportedError}.
    */
+  pair (options: PairOptions): Promise<void>;
+  pair (kind?: DevicePairingKinds | null, protectionLevel?: DevicePairingProtectionLevel | null): Promise<void>;
   async pair (
-    kind?: DevicePairingKinds | null,
-    protectionLevel?: DevicePairingProtectionLevel | null
+    kindOrOptions?: DevicePairingKinds | PairOptions | null,
+    positionalProtectionLevel?: DevicePairingProtectionLevel | null
   ): Promise<void> {
-    kind ??= DevicePairingKinds.ConfirmOnly;
-    protectionLevel ??= DevicePairingProtectionLevel.Encryption;
+    let kind: DevicePairingKinds | null | undefined;
+    let protectionLevel: DevicePairingProtectionLevel | null | undefined;
+    let pin: unknown;
+    if (typeof kindOrOptions === 'object' && kindOrOptions !== null && !Array.isArray(kindOrOptions)) {
+      if (positionalProtectionLevel !== undefined) {
+        throw new TypeError('pair() takes either options or (kind, protectionLevel), not both');
+      }
+      ({ kind, protectionLevel, pin } = kindOrOptions);
+    } else {
+      kind = kindOrOptions;
+      protectionLevel = positionalProtectionLevel;
+    }
+
+    // An empty PIN is refused rather than read as "no PIN": the caller asked
+    // for authenticated pairing and must not silently get less.
+    if (pin !== undefined && (typeof pin !== 'string' || pin.length === 0)) {
+      throw new TypeError('pair() options.pin must be a non-empty string');
+    }
+    const hasPin = pin !== undefined;
+
+    kind ??= hasPin
+      ? DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin | DevicePairingKinds.ConfirmPinMatch
+      : DevicePairingKinds.ConfirmOnly;
+    protectionLevel ??= hasPin
+      ? DevicePairingProtectionLevel.EncryptionAndAuthentication
+      : DevicePairingProtectionLevel.Encryption;
 
     if (!isUint32(kind)) {
       throw new TypeError('pair() kind must be a finite uint32 DevicePairingKinds bitmask');
@@ -207,12 +238,33 @@ export class Peripheral {
     if (!isUint32(protectionLevel)) {
       throw new TypeError('pair() protectionLevel must be a finite uint32 DevicePairingProtectionLevel');
     }
+    if (hasPin && protectionLevel !== DevicePairingProtectionLevel.EncryptionAndAuthentication) {
+      throw new TypeError('pair() with a PIN requires DevicePairingProtectionLevel.EncryptionAndAuthentication');
+    }
 
     const { bindings, peripheralId } = this.session;
     if (!bindings.pair) {
       throw new NotSupportedError('Pairing is not supported on this platform');
     }
-    await bindings.pair(peripheralId, kind, protectionLevel);
+    if (hasPin) {
+      await bindings.pair(peripheralId, kind, protectionLevel, pin as string);
+    } else {
+      await bindings.pair(peripheralId, kind, protectionLevel);
+    }
+  }
+
+  /**
+   * Whether the platform already holds a bond with the peripheral, so an
+   * application can skip asking for a PIN. Only the Windows binding reports
+   * pairing state, and only for a connected peripheral; with any other
+   * binding this resolves `false`.
+   */
+  async isPaired (): Promise<boolean> {
+    const { bindings, peripheralId } = this.session;
+    if (!bindings.isPaired) {
+      return false;
+    }
+    return await bindings.isPaired(peripheralId) === true;
   }
 
   /** Reads the RSSI of the live connection. */

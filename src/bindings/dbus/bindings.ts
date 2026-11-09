@@ -52,7 +52,10 @@ const FLAG_TO_PROPERTY: Readonly<Record<string, CharacteristicProperty>> = {
 export interface DbusBindingsOptions {
   /** BlueZ adapter name, e.g. `'hci1'`. Takes precedence over {@link hciDeviceId}. */
   adapterId?: string;
-  /** Adapter index; `1` selects `hci1`. The first adapter is used when neither option matches. */
+  /**
+   * Adapter index; `1` selects `hci1`. Defaults to `NOBLE_HCI_DEVICE_ID`. The
+   * first adapter is used (with a warning) when the requested one does not exist.
+   */
   hciDeviceId?: number | string;
 }
 
@@ -278,7 +281,14 @@ export class DbusBindings implements Bindings {
   private adapterIface: AdapterIface | null = null;
   private adapterProps: PropertiesIface | null = null;
   private state: AdapterState = 'unknown';
+  /** The scan the application asked for. BlueZ may be paused underneath it, see {@link pauseDiscoveryForConnect}. */
   private isScanning = false;
+  /** Connect attempts that currently own the adapter. */
+  private connectsInFlight = 0;
+  /** A scan is owed to BlueZ once the last connect attempt finishes. */
+  private discoveryDeferredByConnect = false;
+  /** The `StopDiscovery` of the current pause, so later attempts wait for it too. */
+  private discoveryPause: Promise<void> | null = null;
 
   /** Mirror of BlueZ's object tree: path -> interface -> properties. */
   private readonly objects = new Map<string, InterfaceMap>();
@@ -331,9 +341,14 @@ export class DbusBindings implements Bindings {
     const wasScanning = this.isScanning;
     this.isScanning = false;
     this.unwatchAllDeviceProps();
-    if (wasScanning && this.adapterIface) {
+    // A scan paused for a connect is already stopped in BlueZ.
+    if (wasScanning && this.adapterIface && !this.discoveryDeferredByConnect) {
       this.adapterIface.StopDiscovery().catch(() => {});
     }
+    // Attempts still unwinding must not restart discovery behind stop().
+    this.connectsInFlight = 0;
+    this.discoveryDeferredByConnect = false;
+    this.discoveryPause = null;
     if (this.bus && typeof this.bus.disconnect === 'function') {
       try { this.bus.disconnect(); } catch { /* ignore */ }
     }
@@ -365,7 +380,14 @@ export class DbusBindings implements Bindings {
       debug('SetDiscoveryFilter failed: %s', errorMessage(err));
     }
     if (!this.isScanning) {
-      await this.adapterIface.StartDiscovery();
+      if (this.connectsInFlight === 0) {
+        await this.adapterIface.StartDiscovery();
+      } else {
+        // A connect attempt owns the adapter: record the intent and let its
+        // resume issue the real command. Without this the scan would count as
+        // running while BlueZ was never told to start it.
+        this.discoveryDeferredByConnect = true;
+      }
       this.isScanning = true;
     }
 
@@ -397,7 +419,9 @@ export class DbusBindings implements Bindings {
     // re-attaching a listener that would outlive the scan.
     this.isScanning = false;
     this.unwatchAllDeviceProps();
-    if (wasScanning && this.adapterIface) {
+    // While a connect attempt has discovery paused there is nothing to stop in
+    // BlueZ; clearing isScanning is what keeps the resume from restarting it.
+    if (wasScanning && this.adapterIface && !this.discoveryDeferredByConnect) {
       try {
         await this.adapterIface.StopDiscovery();
       } catch (err) {
@@ -408,14 +432,64 @@ export class DbusBindings implements Bindings {
     this.delegate?.onScanStop();
   }
 
+  // BlueZ resumes its own scan as soon as the controller reports the
+  // connection, which is still inside the link layer establishment window. Keep
+  // the radio free until the attempt settles, the way the hci backend
+  // serialises scanning against connecting. This talks to BlueZ directly: the
+  // application's scan stays logically running, so no onScanStop/onScanStart,
+  // and the advertisement watchers stay attached.
+  // discoveryDeferredByConnect means a scan is owed once the last attempt
+  // finishes, whether this stopped a running one or startScanning skipped
+  // starting it.
+  private async pauseDiscoveryForConnect (): Promise<void> {
+    this.connectsInFlight += 1;
+    if (this.connectsInFlight !== 1) {
+      // Another attempt already paused discovery; wait for its StopDiscovery.
+      if (this.discoveryPause) await this.discoveryPause;
+      return;
+    }
+    const adapter = this.adapterIface;
+    if (!this.isScanning || !adapter) return;
+
+    this.discoveryDeferredByConnect = true;
+    const pause = adapter.StopDiscovery().catch((err: unknown) => {
+      debug('StopDiscovery for connect failed: %s', errorMessage(err));
+    });
+    this.discoveryPause = pause;
+    try {
+      await pause;
+    } finally {
+      if (this.discoveryPause === pause) this.discoveryPause = null;
+    }
+  }
+
+  private async resumeDiscoveryAfterConnect (): Promise<void> {
+    this.connectsInFlight = Math.max(0, this.connectsInFlight - 1);
+    if (this.connectsInFlight !== 0 || !this.discoveryDeferredByConnect) return;
+
+    this.discoveryDeferredByConnect = false;
+    // An explicit stopScanning() during the attempt cleared isScanning and must still win.
+    if (!this.isScanning || !this.adapterIface) return;
+
+    try {
+      await this.adapterIface.StartDiscovery();
+    } catch (err) {
+      debug('StartDiscovery after connect failed: %s', errorMessage(err));
+      this.delegate?.onWarning(`could not resume discovery after connect: ${errorMessage(err)}`);
+    }
+  }
+
   addressToId (address: string): string {
     return addressToId(address);
   }
 
   // ---- Connect / disconnect ----
 
-  connect (peripheralId: string, _options?: ConnectOptions): Promise<void> {
+  connect (peripheralId: string, options?: ConnectOptions): Promise<void> {
     const id = normalizeId(peripheralId);
+    if (options?.mtu !== undefined) {
+      this.delegate?.onWarning('the mtu connect option is not supported on the dbus backend (BlueZ negotiates the ATT MTU)');
+    }
     const device = this.devices.get(id);
     if (!device) {
       return Promise.reject(new NobleError(`unknown peripheral ${id}`));
@@ -637,13 +711,23 @@ export class DbusBindings implements Bindings {
   }
 
   private pickAdapterPath (): string | null {
+    // Same source and parsing as the hci backend: the option wins, an unset or
+    // empty NOBLE_HCI_DEVICE_ID means "no preference".
+    const hciDeviceId = this.options.hciDeviceId != null
+      ? parseInt(String(this.options.hciDeviceId), 10)
+      : process.env.NOBLE_HCI_DEVICE_ID
+        ? parseInt(process.env.NOBLE_HCI_DEVICE_ID, 10)
+        : undefined;
     const requested = this.options.adapterId ||
-      (this.options.hciDeviceId != null ? `hci${this.options.hciDeviceId}` : null);
+      (hciDeviceId !== undefined ? `hci${hciDeviceId}` : null);
     let firstMatch: string | null = null;
     for (const [path, ifaces] of this.objects) {
       if (!ifaces[ADAPTER_IFACE]) continue;
       if (!firstMatch) firstMatch = path;
       if (requested && path.endsWith(`/${requested}`)) return path;
+    }
+    if (requested && firstMatch) {
+      this.delegate?.onWarning(`BlueZ adapter ${requested} not found, using ${firstMatch}`);
     }
     return firstMatch;
   }
@@ -892,11 +976,26 @@ export class DbusBindings implements Bindings {
     }
 
     const pending = new Deferred<void>();
+    // The pause below is awaited before anything awaits `pending`, and a drop,
+    // cancelConnect() or stop() may reject it in that window. Mark it handled
+    // so that can never surface as an unhandled rejection; the awaits below
+    // still observe the outcome.
+    pending.promise.catch(() => {});
     device.pendingConnect = pending;
 
-    // Keep both in one await: awaited one after the other, a remote drop that
-    // lands while Connect() is in flight would go unnoticed until it returns.
-    await Promise.all([iface.Connect(), pending.promise]);
+    await this.pauseDiscoveryForConnect();
+    try {
+      if (device.pendingConnect !== pending) {
+        // Settled while discovery was being paused: don't issue Connect().
+        await pending.promise;
+        return;
+      }
+      // Keep both in one await: awaited one after the other, a remote drop that
+      // lands while Connect() is in flight would go unnoticed until it returns.
+      await Promise.all([iface.Connect(), pending.promise]);
+    } finally {
+      await this.resumeDiscoveryAfterConnect();
+    }
   }
 
   private async disconnectDevice (id: string): Promise<void> {

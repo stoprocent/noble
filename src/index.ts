@@ -27,6 +27,7 @@ export {
   NotSupportedError,
   TimeoutError
 } from './common/errors';
+export type { NativeErrorDetails } from './common/errors';
 export type { Listener, Unsubscribe } from './common/signal';
 
 export { DevicePairingKinds, DevicePairingProtectionLevel } from './types';

@@ -52,7 +52,8 @@ export class FakeBindings implements Bindings {
   reset? = jest.fn((): void => {});
   setAddress? = jest.fn((_address: string): void => {});
   setScanParameters? = jest.fn(async (_interval?: number, _window?: number): Promise<void> => {});
-  pair? = jest.fn(async (_id: string, _kind: number, _protectionLevel: number): Promise<void> => {});
+  pair? = jest.fn(async (_id: string, _kind: number, _protectionLevel: number, _pin?: string): Promise<void> => {});
+  isPaired? = jest.fn(async (_id: string): Promise<boolean> => false);
   broadcast? = jest.fn(async (_id: string, _service: string, _characteristic: string, _on: boolean): Promise<void> => {});
 
   startScanning = jest.fn(async (_serviceUuids: string[], _allowDuplicates: boolean): Promise<void> => {

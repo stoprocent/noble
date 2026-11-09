@@ -291,6 +291,12 @@ peripheral.onHandleNotification(({ handle, data }) => { /* ... */ });
 Any operation that is still in flight when the link drops rejects with a
 `DisconnectedError` carrying the `reason`.
 
+On macOS, a `connect()` that fails, or whose attempt is ended by a disconnect
+before the link is up, rejects with an `Error` whose message is the
+CoreBluetooth description and which also carries `nativeErrorDomain` (string)
+and `nativeErrorCode` (number), e.g. `CBErrorDomain` / `14` when the peer
+removed its pairing information (type `NativeErrorDetails`).
+
 The Linux HCI binding reports controller disconnect reasons as numeric HCI
 status codes. Other bindings and library cleanup paths may report a string.
 Use `hciStatusMessage` when a human-readable HCI message is needed:

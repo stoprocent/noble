@@ -117,6 +117,23 @@ public:
         });
     }
 
+    /// Any thread. Rejects with the value `reason` builds (normally an `Error`
+    /// carrying extra properties). Rejects with a plain "unknown error" when
+    /// no factory is given.
+    void rejectWith(RequestId id, ValueFactory reason)
+    {
+        run([id, reason = std::move(reason)](Napi::Env env, State& state) {
+            auto it = state.pending.find(id);
+            if (it == state.pending.end())
+            {
+                return;
+            }
+            auto deferred = it->second;
+            state.pending.erase(it);
+            deferred.Reject(reason ? reason(env) : Napi::Error::New(env, "unknown error").Value());
+        });
+    }
+
     /// Any thread. Calls `delegate[method](...args)`.
     void notify(std::string method, ArgsFactory args = nullptr)
     {

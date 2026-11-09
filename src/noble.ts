@@ -11,6 +11,7 @@ import type {
   DevicePairingKinds,
   DevicePairingProtectionLevel,
   DisconnectReason,
+  PairOptions,
   ScanOptions
 } from './types';
 
@@ -255,13 +256,26 @@ export class Noble {
   }
 
   /** Pairs with a peripheral by id or MAC address. See {@link Peripheral.pair}. */
-  async pair (
+  pair (idOrAddress: string, options: PairOptions): Promise<void>;
+  pair (
     idOrAddress: string,
     kind?: DevicePairingKinds | null,
     protectionLevel?: DevicePairingProtectionLevel | null
+  ): Promise<void>;
+  async pair (
+    idOrAddress: string,
+    kindOrOptions?: DevicePairingKinds | PairOptions | null,
+    protectionLevel?: DevicePairingProtectionLevel | null
   ): Promise<void> {
     this.start();
-    await this.peripheralFor(idOrAddress).pair(kind, protectionLevel);
+    // Peripheral.pair() tells the two call forms apart and validates them.
+    await this.peripheralFor(idOrAddress).pair(kindOrOptions as DevicePairingKinds, protectionLevel);
+  }
+
+  /** Whether a peripheral, by id or MAC address, is already paired. See {@link Peripheral.isPaired}. */
+  async isPaired (idOrAddress: string): Promise<boolean> {
+    this.start();
+    return this.peripheralFor(idOrAddress).isPaired();
   }
 
   /** Called with the current adapter state whenever it changes. Starts the bindings. */

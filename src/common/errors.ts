@@ -33,3 +33,14 @@ export class ConnectionCancelledError extends NobleError {
     super('connection canceled!');
   }
 }
+
+/**
+ * Extra properties the macOS binding puts on the `Error` of a failed or
+ * dropped connection: the domain and code of the CoreBluetooth `NSError`
+ * (for example `CBErrorDomain` / `14`, peer removed pairing information).
+ * Absent on other platforms and on errors noble raises itself.
+ */
+export interface NativeErrorDetails {
+  nativeErrorDomain?: string;
+  nativeErrorCode?: number;
+}
