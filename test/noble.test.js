@@ -49,7 +49,15 @@ describe('noble', () => {
   });
 
   describe('startScanning', () => {
-  
+
+    test('should start bindings only once when it is the first call', async () => {
+      noble.startScanning([], false, () => {});
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(mockBindings.start).toHaveBeenCalledTimes(1);
+      expect(mockBindings.on.mock.calls.filter(([event]) => event === 'stateChange')).toHaveLength(1);
+    });
+
     test('should delegate to binding', () => {
       const expectedServiceUuids = [1, 2, 3];
       const expectedAllowDuplicates = true;
