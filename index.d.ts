@@ -61,6 +61,16 @@ declare module '@stoprocent/noble' {
         maxInterval?: number;
         latency?: number;
         timeout?: number;
+        /**
+         * Client RX MTU to request in the ATT exchange. Must be an integer from 23
+         * to 517; anything else is ignored and the 256 default is requested instead.
+         * The negotiated ATT MTU is the lower of this and the peripheral's, and is
+         * reported by the peripheral's `mtu` event.
+         *
+         * HCI bindings only. CoreBluetooth, WinRT and BlueZ negotiate the MTU
+         * themselves and expose it read-only, so there is nothing to request.
+         */
+        mtu?: number;
     }
 
     export class Noble extends EventEmitter {
@@ -151,7 +161,7 @@ declare module '@stoprocent/noble' {
         /** @deprecated Use id instead */
         readonly uuid: string;
     
-        connectAsync(): Promise<void>;
+        connectAsync(options?: ConnectOptions): Promise<void>;
         pairAsync(kind?: DevicePairingKinds, protectionLevel?: DevicePairingProtectionLevel): Promise<void>;
         disconnectAsync(): Promise<void>;
         updateRssiAsync(): Promise<number>;
@@ -163,6 +173,7 @@ declare module '@stoprocent/noble' {
         writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
 
         connect(callback?: (error: Error | undefined) => void): void;
+        connect(options: ConnectOptions, callback?: (error: Error | undefined) => void): void;
         pair(callback: (error: Error | undefined) => void): void;
         pair(kind?: DevicePairingKinds, callback?: (error: Error | undefined) => void): void;
         pair(kind: DevicePairingKinds, protectionLevel: DevicePairingProtectionLevel, callback?: (error: Error | undefined) => void): void;

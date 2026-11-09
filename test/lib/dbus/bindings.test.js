@@ -633,6 +633,38 @@ describe('dbus/bindings', () => {
       expect(bindings._devices.get('aabbccddeeff').proxy).toBeNull();
     });
 
+    test('warns that the mtu connect option cannot be honoured', async () => {
+      seedDevice();
+      makeProxy(devicePath);
+
+      const bindings = new DbusBindings();
+      const warnings = [];
+      bindings.on('warning', w => warnings.push(w));
+
+      bindings.start();
+      await flush();
+      bindings.connect('aabbccddeeff', { mtu: 23 });
+      await flush();
+
+      expect(warnings.some(w => /mtu connect option is not supported/.test(w))).toBe(true);
+    });
+
+    test('stays quiet when no mtu is requested', async () => {
+      seedDevice();
+      makeProxy(devicePath);
+
+      const bindings = new DbusBindings();
+      const warnings = [];
+      bindings.on('warning', w => warnings.push(w));
+
+      bindings.start();
+      await flush();
+      bindings.connect('aabbccddeeff', { addressType: 'public' });
+      await flush();
+
+      expect(warnings.some(w => /mtu/.test(w))).toBe(false);
+    });
+
     test('a remote drop mid-connect surfaces as connect(error), not disconnect', async () => {
       seedDevice();
       const proxy = makeProxy(devicePath);
