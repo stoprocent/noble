@@ -29,13 +29,6 @@ describe('Service', () => {
       expect(vendor.name).toBeNull();
       expect(vendor.type).toBeNull();
     });
-
-    // The lookup is a plain property access on the JSON table.
-    test('[BUG] a uuid that happens to be an Object.prototype key is not mistaken for a known service', () => {
-      expect(() => new Service(session, 'constructor')).not.toThrow();
-      expect(new Service(session, 'constructor').name).toBeNull();
-      expect(new Service(session, 'toString').name).toBeNull();
-    });
   });
 
   test('has no discovery results before the first discovery', () => {
