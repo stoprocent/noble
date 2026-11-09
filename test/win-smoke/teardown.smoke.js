@@ -17,6 +17,8 @@
 // A clean exit also proves the native keep-alive (the referenced N-API
 // ThreadSafeFunction) is released on stop(), so a probe can exit in-process.
 //
+// It runs against the compiled package (`npm run build` first).
+//
 // This only exercises the native module on win32; on other platforms it is a
 // no-op so it is safe to invoke unconditionally from CI.
 
@@ -36,12 +38,12 @@ const { withBindings } = require('../..');
 }
 
 // Case 2: stress start() -> immediate stop() to exercise the RadioWatcher
-// coroutine teardown. Reading `.state` forces _initializeBindings() ->
+// coroutine teardown. Reading `.state` forces Noble#start() ->
 // bindings.start() synchronously, without needing a powered-on adapter.
 const ITERATIONS = 50;
 for (let i = 0; i < ITERATIONS; i++) {
   const noble = withBindings('default');
-  noble.on('stateChange', () => {});
+  noble.onStateChange(() => {});
   assert.strictEqual(typeof noble.state, 'string');
   noble.stop();
 }
