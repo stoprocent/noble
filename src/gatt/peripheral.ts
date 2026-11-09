@@ -17,6 +17,11 @@ import type { HandleNotification, PeripheralSession } from './session';
 
 const UINT32_MAX = 0xffffffff;
 
+interface ConnectAttempt {
+  promise: Promise<void>;
+  cancelled: Deferred<never>;
+}
+
 export interface ServicesAndCharacteristics {
   services: Service[];
   characteristics: Characteristic[];
@@ -36,7 +41,7 @@ export class Peripheral {
   private discoveredServices: Service[] | null = null;
 
   /** The connection attempt in flight, shared by concurrent `connect()` callers. */
-  private pendingConnect: { promise: Promise<void>; cancelled: Deferred<never> } | null = null;
+  private pendingConnect: ConnectAttempt | null = null;
 
   private readonly disconnectSignal = new Signal<DisconnectReason>();
 
@@ -67,6 +72,7 @@ export class Peripheral {
       // An attempt that never produced a link is reported by `connect()` rejecting.
       const hadLink = this.currentState === 'connected' || this.currentState === 'disconnecting';
       this.currentState = 'disconnected';
+      this.currentMtu = null;
       if (hadLink) {
         this.disconnectSignal.emit(reason);
       }
@@ -93,41 +99,62 @@ export class Peripheral {
     if (this.currentState === 'connected') {
       return Promise.reject(new NobleError('Peripheral already connected'));
     }
+    if (this.currentState === 'disconnecting') {
+      // Let the old link finish going down, then connect afresh.
+      return this.disconnect().then(() => this.connect(options));
+    }
     if (this.pendingConnect) {
       return this.pendingConnect.promise;
     }
 
-    const cancelled = new Deferred<never>();
     const { bindings, peripheralId } = this.session;
-    this.currentState = 'connecting';
+    const attempt: ConnectAttempt = { cancelled: new Deferred<never>(), promise: Promise.resolve() };
+    const isCurrent = (): boolean => this.pendingConnect === attempt;
 
-    const promise = Promise.race([
-      this.session.guard(bindings.connect(peripheralId, options)),
-      cancelled.promise
-    ]).then(
+    let linking: Promise<void>;
+    try {
+      linking = bindings.connect(peripheralId, options);
+    } catch (error) {
+      linking = Promise.reject(error);
+    }
+    // A link that comes up after the attempt was abandoned must not be left dangling.
+    linking.then(() => {
+      if (!isCurrent() && this.currentState !== 'connected') {
+        bindings.disconnect(peripheralId);
+      }
+    }, () => {});
+
+    this.currentState = 'connecting';
+    this.pendingConnect = attempt;
+    attempt.promise = Promise.race([this.session.guard(linking), attempt.cancelled.promise]).then(
       () => {
-        this.pendingConnect = null;
-        this.currentState = 'connected';
+        if (isCurrent()) {
+          this.pendingConnect = null;
+          this.currentState = 'connected';
+        }
       },
       (error: Error) => {
-        this.pendingConnect = null;
-        if (this.currentState === 'connecting') {
-          this.currentState = error instanceof ConnectionCancelledError ? 'disconnected' : 'error';
+        if (isCurrent()) {
+          this.pendingConnect = null;
+          if (this.currentState === 'connecting') {
+            this.currentState = 'error';
+          }
         }
         throw error;
       }
     );
-
-    this.pendingConnect = { promise, cancelled };
-    return promise;
+    return attempt.promise;
   }
 
   /** Abandons a connection attempt that has not completed yet. */
   cancelConnect (): void {
-    if (!this.pendingConnect) {
+    const attempt = this.pendingConnect;
+    if (!attempt) {
       return;
     }
-    this.pendingConnect.cancelled.reject(new ConnectionCancelledError());
+    this.pendingConnect = null;
+    this.currentState = 'disconnected';
+    attempt.cancelled.reject(new ConnectionCancelledError());
     this.session.bindings.cancelConnect(this.session.peripheralId);
   }
 
@@ -163,9 +190,12 @@ export class Peripheral {
    * {@link NotSupportedError}.
    */
   async pair (
-    kind: DevicePairingKinds = DevicePairingKinds.ConfirmOnly,
-    protectionLevel: DevicePairingProtectionLevel = DevicePairingProtectionLevel.Encryption
+    kind?: DevicePairingKinds | null,
+    protectionLevel?: DevicePairingProtectionLevel | null
   ): Promise<void> {
+    kind ??= DevicePairingKinds.ConfirmOnly;
+    protectionLevel ??= DevicePairingProtectionLevel.Encryption;
+
     if (!isUint32(kind)) {
       throw new TypeError('pair() kind must be a finite uint32 DevicePairingKinds bitmask');
     }
@@ -231,12 +261,12 @@ export class Peripheral {
     return this.session.guard(bindings.readHandle(peripheralId, handle));
   }
 
-  writeHandle (handle: number, data: Buffer, withoutResponse = false): Promise<void> {
+  async writeHandle (handle: number, data: Buffer, withoutResponse = false): Promise<void> {
     if (!Buffer.isBuffer(data)) {
       throw new TypeError('data must be a Buffer');
     }
     const { bindings, peripheralId } = this.session;
-    return this.session.guard(bindings.writeHandle(peripheralId, handle, data, withoutResponse));
+    await this.session.guard(bindings.writeHandle(peripheralId, handle, data, withoutResponse));
   }
 
   /** Called whenever the link goes down, for any reason. */
@@ -260,6 +290,7 @@ export class Peripheral {
       address: this.address,
       addressType: this.addressType,
       connectable: this.connectable,
+      scannable: this.scannable,
       advertisement: this.advertisement,
       rssi: this.rssi,
       mtu: this.mtu,
@@ -275,7 +306,8 @@ export class Peripheral {
   private applyAdvertisement (update: DiscoveredPeripheral): void {
     const merged: Advertisement = { ...this.currentAdvertisement };
     for (const [key, value] of Object.entries(update.advertisement)) {
-      if (value !== undefined) {
+      // The native addons send `null` for fields a report does not carry.
+      if (value !== undefined && value !== null) {
         (merged as unknown as Record<string, unknown>)[key] = value;
       }
     }

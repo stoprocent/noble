@@ -165,7 +165,7 @@ export class NativeBindings implements Bindings {
     const deferred = new Deferred<unknown>();
     const requestKey = completionKey(key);
     const queue = this.pending.get(requestKey) ?? [];
-    queue.push({ peripheralId, deferred });
+    queue.push({ peripheralId: peripheralId === null ? null : normalize(peripheralId), deferred });
     this.pending.set(requestKey, queue);
 
     try {
@@ -207,9 +207,10 @@ export class NativeBindings implements Bindings {
 
   /** The addon will never answer requests of a peripheral whose link is gone. */
   private rejectAll (peripheralId: string, error: Error): void {
+    const id = normalize(peripheralId);
     for (const [requestKey, queue] of [...this.pending]) {
       const remaining = queue.filter(request => {
-        if (request.peripheralId !== peripheralId) {
+        if (request.peripheralId !== id) {
           return true;
         }
         request.deferred.reject(error);
@@ -325,9 +326,13 @@ export class NativeBindings implements Bindings {
   }
 }
 
+/** Ids and UUIDs come back from the addons lowercased and without dashes. */
+function normalize (part: string | number): string {
+  return String(part).replace(/-/g, '').toLowerCase();
+}
+
 function completionKey (parts: Array<string | number>): string {
-  // UUIDs come back from the addons lowercased and without dashes.
-  return parts.map(part => String(part).replace(/-/g, '').toLowerCase()).join('|');
+  return parts.map(normalize).join('|');
 }
 
 /** Loads the prebuilt (or locally built) addon and wraps the requested backend. */

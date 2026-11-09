@@ -1,4 +1,5 @@
 import type { Bindings, DiscoveredPeripheral } from '../bindings/bindings';
+import { AsyncQueue } from '../common/async-queue';
 import { DisconnectedError } from '../common/errors';
 import { Signal } from '../common/signal';
 import type { DisconnectReason } from '../types';
@@ -30,13 +31,24 @@ export class PeripheralSession {
 
   private readonly notificationSignals = new Map<string, Signal<Buffer>>();
   private readonly notifying = new Set<string>();
+  /** Notification state changes in flight, so concurrent callers share one request. */
+  private readonly notifyRequests = new Map<string, { notify: boolean; promise: Promise<void> }>();
+  /** Live `notifications()` iterations per characteristic. */
+  private readonly streams = new Map<string, Set<AsyncQueue<Buffer>>>();
 
   constructor (
     readonly bindings: Bindings,
     readonly peripheralId: string
   ) {
     // Subscriptions do not survive a link loss.
-    this.disconnected.subscribe(() => this.notifying.clear());
+    this.disconnected.subscribe(reason => {
+      this.notifying.clear();
+      this.notifyRequests.clear();
+      for (const stream of [...this.streams.values()].flatMap(streams => [...streams])) {
+        stream.end(new DisconnectedError(reason));
+      }
+      this.streams.clear();
+    });
   }
 
   /**
@@ -78,13 +90,69 @@ export class PeripheralSession {
     return this.notifying.has(characteristicKey(serviceUuid, characteristicUuid));
   }
 
-  setNotifying (serviceUuid: string, characteristicUuid: string, notifying: boolean): void {
+  /**
+   * Switches notifications for a characteristic on or off. A no-op when
+   * already in that state; concurrent calls for the same state share one request.
+   */
+  setNotifying (serviceUuid: string, characteristicUuid: string, notify: boolean): Promise<void> {
     const key = characteristicKey(serviceUuid, characteristicUuid);
-    if (notifying) {
-      this.notifying.add(key);
-    } else {
-      this.notifying.delete(key);
+    const inFlight = this.notifyRequests.get(key);
+    if (inFlight?.notify === notify) {
+      return inFlight.promise;
     }
+    if (!inFlight && this.notifying.has(key) === notify) {
+      return Promise.resolve();
+    }
+
+    const request = { notify, promise: Promise.resolve() };
+    request.promise = (async () => {
+      // Opposite requests are applied in the order they were made.
+      await inFlight?.promise.catch(() => {});
+      try {
+        await this.guard(this.bindings.notify(this.peripheralId, serviceUuid, characteristicUuid, notify));
+      } finally {
+        if (this.notifyRequests.get(key) === request) {
+          this.notifyRequests.delete(key);
+        }
+      }
+      if (notify) {
+        this.notifying.add(key);
+      } else {
+        this.notifying.delete(key);
+        // Nothing more will arrive: finish the iterations that were consuming it.
+        for (const stream of this.streams.get(key) ?? []) {
+          stream.end();
+        }
+        this.streams.delete(key);
+      }
+    })();
+    this.notifyRequests.set(key, request);
+    return request.promise;
+  }
+
+  /** Opens a queue fed by the characteristic's notifications until {@link closeStream}. */
+  openStream (serviceUuid: string, characteristicUuid: string): AsyncQueue<Buffer> {
+    const key = characteristicKey(serviceUuid, characteristicUuid);
+    const stream = new AsyncQueue<Buffer>();
+    const streams = this.streams.get(key) ?? new Set<AsyncQueue<Buffer>>();
+    streams.add(stream);
+    this.streams.set(key, streams);
+    return stream;
+  }
+
+  /** Closes a stream and returns how many others are still open on the characteristic. */
+  closeStream (serviceUuid: string, characteristicUuid: string, stream: AsyncQueue<Buffer>): number {
+    const key = characteristicKey(serviceUuid, characteristicUuid);
+    const streams = this.streams.get(key);
+    stream.end();
+    if (!streams) {
+      return 0;
+    }
+    streams.delete(stream);
+    if (streams.size === 0) {
+      this.streams.delete(key);
+    }
+    return streams.size;
   }
 }
 

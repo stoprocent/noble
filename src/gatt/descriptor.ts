@@ -28,12 +28,12 @@ export class Descriptor {
     );
   }
 
-  writeValue (data: Buffer): Promise<void> {
+  async writeValue (data: Buffer): Promise<void> {
     if (!Buffer.isBuffer(data)) {
       throw new TypeError('data must be a Buffer');
     }
     const { bindings, peripheralId } = this.session;
-    return this.session.guard(
+    await this.session.guard(
       bindings.writeValue(peripheralId, this.serviceUuid, this.characteristicUuid, this.uuid, data)
     );
   }

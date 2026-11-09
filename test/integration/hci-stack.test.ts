@@ -200,7 +200,9 @@ describe('HCI stack end to end', () => {
 
   afterEach(() => {
     noble.stop();
-    expect(warnings).toEqual([]);
+    if (warnings.length > 0) {
+      throw new Error(`unexpected warnings: ${warnings.join('; ')}`);
+    }
   });
 
   async function discoverSim (): Promise<Peripheral> {

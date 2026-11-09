@@ -5,7 +5,7 @@
  */
 export class AsyncQueue<T> implements AsyncIterableIterator<T> {
   private readonly values: T[] = [];
-  private waiter: (() => void) | null = null;
+  private waiters: Array<() => void> = [];
   private ended = false;
   private error: Error | null = null;
 
@@ -32,7 +32,7 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
         return { value: undefined, done: true };
       }
       await new Promise<void>(resolve => {
-        this.waiter = resolve;
+        this.waiters.push(resolve);
       });
     }
   }
@@ -48,8 +48,10 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
   }
 
   private wake (): void {
-    const waiter = this.waiter;
-    this.waiter = null;
-    waiter?.();
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const waiter of waiters) {
+      waiter();
+    }
   }
 }

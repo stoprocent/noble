@@ -1,5 +1,4 @@
-import { AsyncQueue } from '../common/async-queue';
-import { DisconnectedError, NotSupportedError } from '../common/errors';
+import { NotSupportedError } from '../common/errors';
 import type { Listener, Unsubscribe } from '../common/signal';
 import type { CharacteristicProperty } from '../types';
 import characteristics from './characteristics.json';
@@ -15,8 +14,6 @@ export class Characteristic {
   readonly type: string | null;
 
   private discoveredDescriptors: Descriptor[] | null = null;
-  /** Live {@link notifications} iterations, ended when notifications are switched off. */
-  private readonly activeStreams = new Set<AsyncQueue<Buffer>>();
 
   /** @internal */
   constructor (
@@ -45,25 +42,25 @@ export class Characteristic {
     return this.session.guard(bindings.read(peripheralId, this.serviceUuid, this.uuid));
   }
 
-  write (data: Buffer | Uint8Array, withoutResponse = false): Promise<void> {
+  async write (data: Buffer | Uint8Array, withoutResponse = false): Promise<void> {
     if (!(data instanceof Uint8Array)) {
       throw new TypeError('data must be a Buffer or Uint8Array');
     }
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
     const { bindings, peripheralId } = this.session;
-    return this.session.guard(
+    await this.session.guard(
       bindings.write(peripheralId, this.serviceUuid, this.uuid, buffer, withoutResponse)
     );
   }
 
   /** Enables notifications (or indications). A no-op when already enabled. */
-  async subscribe (): Promise<void> {
-    await this.setNotify(true);
+  subscribe (): Promise<void> {
+    return this.session.setNotifying(this.serviceUuid, this.uuid, true);
   }
 
   /** Disables notifications (or indications). A no-op when not enabled. */
-  async unsubscribe (): Promise<void> {
-    await this.setNotify(false);
+  unsubscribe (): Promise<void> {
+    return this.session.setNotifying(this.serviceUuid, this.uuid, false);
   }
 
   /**
@@ -77,25 +74,23 @@ export class Characteristic {
 
   /**
    * Subscribes and yields every notified value until the consumer stops
-   * iterating (which unsubscribes again) or {@link unsubscribe} is called.
+   * iterating or {@link unsubscribe} is called. Leaving the loop unsubscribes
+   * again, unless notifications were already enabled before or another
+   * `notifications()` loop is still running on this characteristic.
    * Throws {@link DisconnectedError} if the link drops mid-stream.
    */
   async * notifications (): AsyncGenerator<Buffer, void, void> {
-    const queue = new AsyncQueue<Buffer>();
-    const stopListening = this.onNotification(data => queue.push(data));
-    const stopWatching = this.session.disconnected.subscribe(reason => {
-      queue.end(new DisconnectedError(reason));
-    });
-    this.activeStreams.add(queue);
+    const wasNotifying = this.isNotifying;
+    const stream = this.session.openStream(this.serviceUuid, this.uuid);
+    const stopListening = this.onNotification(data => stream.push(data));
 
     try {
       await this.subscribe();
-      yield * queue;
+      yield * stream;
     } finally {
       stopListening();
-      stopWatching();
-      this.activeStreams.delete(queue);
-      if (this.activeStreams.size === 0 && this.isNotifying) {
+      const remaining = this.session.closeStream(this.serviceUuid, this.uuid, stream);
+      if (!wasNotifying && remaining === 0 && this.isNotifying) {
         await this.unsubscribe().catch(() => {
           // The link may already be gone; there is nothing left to undo.
         });
@@ -128,19 +123,5 @@ export class Characteristic {
 
   toString (): string {
     return JSON.stringify(this);
-  }
-
-  private async setNotify (notify: boolean): Promise<void> {
-    if (notify === this.isNotifying) {
-      return;
-    }
-    const { bindings, peripheralId } = this.session;
-    await this.session.guard(bindings.notify(peripheralId, this.serviceUuid, this.uuid, notify));
-    this.session.setNotifying(this.serviceUuid, this.uuid, notify);
-    if (!notify) {
-      for (const stream of this.activeStreams) {
-        stream.end();
-      }
-    }
   }
 }

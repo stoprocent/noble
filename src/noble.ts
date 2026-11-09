@@ -76,6 +76,7 @@ export class Noble {
   stop (): void {
     this.scanStopRequests += 1;
     this.bindings.stop();
+    this.dropLinks('stopped');
     this.stopSignal.emit();
   }
 
@@ -168,6 +169,16 @@ export class Noble {
       }
     });
 
+    const startScan = async (): Promise<void> => {
+      const stopsBefore = observedStops;
+      await this.startScanning(options);
+      // Bindings normally report the start themselves; a resolved start means
+      // "scanning" even if one did not, unless a stop was observed meanwhile.
+      if (observedStops === stopsBefore) {
+        scanning = true;
+      }
+    };
+
     const subscriptions = [
       this.discoverSignal.subscribe(peripheral => {
         queue.push(peripheral);
@@ -187,7 +198,7 @@ export class Noble {
     ];
 
     try {
-      await this.startScanning(options);
+      await startScan();
       resumedThroughStop = observedStops;
 
       while (shouldContinue()) {
@@ -196,14 +207,14 @@ export class Noble {
           // the discovery scan, without a matching stop. Stops are counted
           // independently so that transient start cannot suppress the restart.
           const stoppedThrough = observedStops;
-          await this.startScanning(options);
+          await startScan();
           resumedThroughStop = stoppedThrough;
         } else if (queue.length > 0) {
           yield queue.shift() as Peripheral;
         } else if (!scanning) {
           // HCI bindings pause scanning before connecting. Resume the session
           // once the consumer finished handling the yielded peripheral.
-          await this.startScanning(options);
+          await startScan();
         } else {
           await waitForActivity();
         }
@@ -246,8 +257,8 @@ export class Noble {
   /** Pairs with a peripheral by id or MAC address. See {@link Peripheral.pair}. */
   async pair (
     idOrAddress: string,
-    kind?: DevicePairingKinds,
-    protectionLevel?: DevicePairingProtectionLevel
+    kind?: DevicePairingKinds | null,
+    protectionLevel?: DevicePairingProtectionLevel | null
   ): Promise<void> {
     this.start();
     await this.peripheralFor(idOrAddress).pair(kind, protectionLevel);
@@ -351,12 +362,14 @@ export class Noble {
     }
   }
 
-  /** Any transition away from poweredOn invalidates live links and pending work. */
-  private dropPeripherals (reason: DisconnectReason): void {
-    const entries = [...this.entries.values()];
-    this.entries.clear();
+  /**
+   * Live links and pending connects do not survive the adapter going away.
+   * The peripherals themselves stay known, so objects the application holds
+   * keep working once the adapter is back.
+   */
+  private dropLinks (reason: DisconnectReason): void {
     this.reported.clear();
-    for (const { peripheral, session } of entries) {
+    for (const { peripheral, session } of [...this.entries.values()]) {
       if (peripheral.state !== 'disconnected' && peripheral.state !== 'error') {
         session.disconnected.emit(reason);
       }
@@ -387,10 +400,11 @@ export class Noble {
     return {
       onStateChange: state => {
         debug(`stateChange ${state}`);
-        if (state !== 'poweredOn' && this.currentState === 'poweredOn') {
-          this.dropPeripherals('cleanup');
-        }
+        const leftPoweredOn = state !== 'poweredOn' && this.currentState === 'poweredOn';
         this.currentState = state;
+        if (leftPoweredOn) {
+          this.dropLinks('cleanup');
+        }
         this.stateSignal.emit(state);
       },
       onAddressChange: address => {
