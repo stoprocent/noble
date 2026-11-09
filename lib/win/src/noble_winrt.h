@@ -2,7 +2,14 @@
 
 #include <napi.h>
 
+#include <memory>
+
+#include "JsBridge.h"
 #include "ble_manager.h"
+
+// noble's `Bindings` contract (src/bindings/bindings.ts), implemented natively:
+// every request returns a promise settled through the JsBridge, and unsolicited
+// activity is reported to the `BindingsDelegate` passed to start().
 
 class NobleWinrt : public Napi::ObjectWrap<NobleWinrt>
 {
@@ -34,4 +41,7 @@ public:
 
 private:
     BLEManager* manager = nullptr;
+    // The one channel back into JavaScript. Created by start(), closed by
+    // stop(); the manager and its in-flight WinRT callbacks share it.
+    std::shared_ptr<noble::JsBridge> bridge;
 };

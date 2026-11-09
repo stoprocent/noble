@@ -15,8 +15,12 @@ using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattSession;
 
 #include "winrt/Windows.Devices.Bluetooth.h"
 
+#include <atomic>
+#include <functional>
+#include <memory>
 #include <string>
 #include <optional>
+#include <unordered_map>
 
 #include "Peripheral.h"
 #include "winrt_guid.h"
@@ -58,6 +62,11 @@ public:
 
     void Disconnect();
 
+    // The lookups below call `callback` exactly once, synchronously or from a
+    // WinRT completion, with std::nullopt when the attribute cannot be found
+    // (they never throw into a completion handler, where the exception would
+    // be swallowed and the caller's request left pending). The one exception:
+    // nothing is called once the owning manager is gone (see managerAlive).
     void GetService(winrt::guid serviceUuid,
                     std::function<void(std::optional<GattDeviceService>)> callback);
     void GetCharacteristic(winrt::guid serviceUuid, winrt::guid characteristicUuid,
@@ -74,6 +83,12 @@ public:
     winrt::event_token maxPduSizeChangedToken;
     std::unordered_map<winrt::guid, CachedService> cachedServices;
     bool nameIsComplete { false }; // `name` is the Complete Local Name
+
+    // The BLEManager's liveness flag (set by the manager before it starts a
+    // lookup). The lookup completions keep their own copy and check it before
+    // touching `this`: the peripherals are destroyed with the manager on
+    // stop(), while WinRT may still deliver a completion afterwards.
+    std::shared_ptr<std::atomic<bool>> managerAlive;
 
 private:
     void GetServiceFromDevice(winrt::guid serviceUuid,

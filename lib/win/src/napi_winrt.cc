@@ -1,5 +1,9 @@
 #include "napi_winrt.h"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+
 #include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 #include <rpc.h>
 
@@ -17,14 +21,33 @@ winrt::guid napiToUuid(Napi::String string)
     }
     if (str.size() == 4 || str.size() == 8)
     {
-        int id = std::stoi(str, 0, 16);
+        // std::stoul throws on garbage; an exception that is not a Napi::Error
+        // must never escape into N-API, so validate first.
+        if (str.find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos)
+        {
+            throw Napi::TypeError::New(string.Env(), "Invalid UUID: " + str);
+        }
+        uint32_t id = static_cast<uint32_t>(std::stoul(str, 0, 16));
         return BluetoothUuidHelper::FromShortId(id);
     }
     UUID uuid;
-    UuidFromString((RPC_CSTR)str.c_str(), &uuid);
+    if (UuidFromStringA((RPC_CSTR)str.c_str(), &uuid) != RPC_S_OK)
+    {
+        throw Napi::TypeError::New(string.Env(), "Invalid UUID: " + str);
+    }
     std::array<uint8_t, 8> data4;
     std::copy_n(uuid.Data4, data4.size(), data4.begin());
     return winrt::guid(uuid.Data1, uuid.Data2, uuid.Data3, data4);
+}
+
+std::string napiToPeripheralId(Napi::String string)
+{
+    std::string id = string.Utf8Value();
+    id.erase(std::remove_if(id.begin(), id.end(), [](char c) { return c == ':' || c == '-'; }),
+             id.end());
+    std::transform(id.begin(), id.end(), id.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return id;
 }
 
 std::vector<winrt::guid> napiToUuidArray(Napi::Array array)
@@ -90,4 +113,136 @@ uint32_t getUint32(const Napi::Value& value, uint32_t def)
         return def;
     }
     return asUint32;
+}
+
+Napi::String toUuid(Napi::Env env, const std::string& uuid)
+{
+    std::string str(uuid);
+    str.erase(std::remove(str.begin(), str.end(), '-'), str.end());
+    std::transform(str.begin(), str.end(), str.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return Napi::String::New(env, str);
+}
+
+Napi::String toAddressType(Napi::Env env, AddressType type)
+{
+    if (type == PUBLIC)
+    {
+        return Napi::String::New(env, "public");
+    }
+    else if (type == RANDOM)
+    {
+        return Napi::String::New(env, "random");
+    }
+    return Napi::String::New(env, "unknown");
+}
+
+Napi::Value toBuffer(Napi::Env env, const Data& data)
+{
+    if (data.empty())
+    {
+        return Napi::Buffer<uint8_t>::New(env, 0);
+    }
+    return Napi::Buffer<uint8_t>::Copy(env, data.data(), data.size());
+}
+
+Napi::Array toUuidArray(Napi::Env env, const std::vector<std::string>& data)
+{
+    auto arr = Napi::Array::New(env, data.size());
+    for (size_t i = 0; i < data.size(); i++)
+    {
+        arr.Set(static_cast<uint32_t>(i), toUuid(env, data[i]));
+    }
+    return arr;
+}
+
+Napi::Array toStringArray(Napi::Env env, const std::vector<std::string>& data)
+{
+    auto arr = Napi::Array::New(env, data.size());
+    for (size_t i = 0; i < data.size(); i++)
+    {
+        arr.Set(static_cast<uint32_t>(i), Napi::String::New(env, data[i]));
+    }
+    return arr;
+}
+
+Napi::Array toCharacteristicArray(
+    Napi::Env env,
+    const std::vector<std::pair<std::string, std::vector<std::string>>>& characteristics)
+{
+    auto arr = Napi::Array::New(env, characteristics.size());
+    for (size_t i = 0; i < characteristics.size(); i++)
+    {
+        Napi::Object characteristic = Napi::Object::New(env);
+        characteristic.Set("uuid", toUuid(env, characteristics[i].first));
+        characteristic.Set("properties", toStringArray(env, characteristics[i].second));
+        arr.Set(static_cast<uint32_t>(i), characteristic);
+    }
+    return arr;
+}
+
+Napi::Object toDiscoveredPeripheral(Napi::Env env, const std::string& id, int rssi,
+                                    const Peripheral& peripheral)
+{
+    Napi::Object advertisement = Napi::Object::New(env);
+
+    // Absent optional fields are reported as null.
+    if (peripheral.name.has_value())
+    {
+        advertisement.Set("localName", Napi::String::New(env, peripheral.name.value()));
+    }
+    else
+    {
+        advertisement.Set("localName", env.Null());
+    }
+
+    if (peripheral.txPowerLevel.has_value())
+    {
+        advertisement.Set("txPowerLevel", Napi::Number::New(env, peripheral.txPowerLevel.value()));
+    }
+    else
+    {
+        advertisement.Set("txPowerLevel", env.Null());
+    }
+
+    if (peripheral.manufacturerData.has_value())
+    {
+        advertisement.Set("manufacturerData", toBuffer(env, peripheral.manufacturerData.value()));
+    }
+    else
+    {
+        advertisement.Set("manufacturerData", env.Null());
+    }
+
+    auto serviceData = Napi::Array::New(env);
+    if (peripheral.serviceData.has_value())
+    {
+        const auto& data = peripheral.serviceData.value();
+        for (size_t i = 0; i < data.size(); i++)
+        {
+            Napi::Object entry = Napi::Object::New(env);
+            entry.Set("uuid", toUuid(env, data[i].first));
+            entry.Set("data", toBuffer(env, data[i].second));
+            serviceData.Set(static_cast<uint32_t>(i), entry);
+        }
+    }
+    advertisement.Set("serviceData", serviceData);
+
+    if (peripheral.serviceUuids.has_value())
+    {
+        advertisement.Set("serviceUuids", toUuidArray(env, peripheral.serviceUuids.value()));
+    }
+    else
+    {
+        advertisement.Set("serviceUuids", Napi::Array::New(env));
+    }
+
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("id", toUuid(env, id));
+    result.Set("address", Napi::String::New(env, peripheral.address));
+    result.Set("addressType", toAddressType(env, peripheral.addressType));
+    result.Set("connectable", Napi::Boolean::New(env, peripheral.connectable));
+    result.Set("advertisement", advertisement);
+    result.Set("rssi", Napi::Number::New(env, rssi));
+    return result;
 }
