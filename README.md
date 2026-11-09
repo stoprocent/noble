@@ -408,6 +408,14 @@ await noble.pairAsync(
   DevicePairingProtectionLevel.EncryptionAndAuthentication
 );
 
+// Or supply a PIN for authenticated ProvidePin / ConfirmPinMatch pairing.
+await peripheral.pairAsync({ pin: '123456' });
+
+// A connected peripheral can be checked before prompting for a PIN.
+if (!peripheral.isPaired()) {
+  // request a PIN and pair
+}
+
 // Callback form is also available on both.
 noble.pair(idOrAddress, error => { /* ... */ });
 peripheral.pair(error => { /* ... */ });
@@ -432,8 +440,14 @@ noble.on('pair', (peripheral, error) => { /* ... */ });
   `DevicePairingKinds` bitmask (single or OR-ed values) and (optionally)
   `DevicePairingProtectionLevel`.
   `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI;
-  PIN/password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
-  rejected because this library does not collect secrets to pass into WinRT.
+  password kinds (`ProvidePassword`, `ConfirmPassword`) remain unsupported.
+- **PIN options.** Passing `{ pin: string }` defaults the ceremony mask to
+  `ConfirmOnly | ProvidePin | ConfirmPinMatch` and the protection level to
+  `EncryptionAndAuthentication`. Noble never logs the PIN; applications remain
+  responsible for collecting and retaining it securely.
+- **`isPaired` is Windows-only state.** It returns `false` when the active
+  binding does not expose pairing state, or when the peripheral is not
+  connected and tracked by the Windows binding.
 
 ### Service Methods
 
