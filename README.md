@@ -236,6 +236,7 @@ noble.cancelConnect(idOrAddress);
 
 // Pair with a peripheral by id or address (Windows only — see "Pairing" below)
 await noble.pair(idOrAddress);
+const paired = await noble.isPaired(idOrAddress);
 
 // Set adapter address (HCI only, on supported devices)
 noble.setAddress('00:11:22:33:44:55');
@@ -270,7 +271,8 @@ peripheral.cancelConnect();        // the pending connect() rejects with Connect
 await peripheral.disconnect();
 
 // Pair with peripheral (Windows only — see "Pairing" below)
-await peripheral.pair();
+await peripheral.pair();          // or peripheral.pair({ pin: '123456' })
+const paired = await peripheral.isPaired();
 
 const rssi = await peripheral.updateRssi();
 
