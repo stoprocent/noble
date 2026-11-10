@@ -434,13 +434,13 @@ All errors raised deliberately by noble extend `NobleError`:
 | `NotSupportedError` | the active bindings cannot perform the operation |
 | `TimeoutError` | `waitForPoweredOn()` timed out |
 
-## Migrating from 1.x
+## Migrating from 2.x
 
-2.0 is a ground-up TypeScript rewrite. The callback API and all
+3.0 is a ground-up TypeScript rewrite. The callback API and all
 `EventEmitter` events are gone; what remains is the promise API, without the
 `Async` suffix.
 
-| 1.x | 2.x |
+| 2.x | 3.x |
 | --- | --- |
 | `const noble = require('@stoprocent/noble')` | `const { default: noble } = require('@stoprocent/noble')` (or `import noble from ...`) |
 | `xxxAsync(...)` | `xxx(...)` — e.g. `peripheral.connectAsync()` → `peripheral.connect()` |
@@ -460,10 +460,10 @@ Other behavioural changes worth knowing about:
 
 - An operation interrupted by a disconnect always rejects with `DisconnectedError`.
 - `peripheral.disconnect()` on a peripheral that is not connected resolves immediately.
-- On the HCI bindings a characteristic/descriptor read that the peripheral answers with an ATT error now rejects (1.x resolved with an empty buffer).
+- On the HCI bindings a characteristic/descriptor read that the peripheral answers with an ATT error now rejects (2.x resolved with an empty buffer).
 - The undocumented GATT handle-cache hooks (`servicesDiscovered` / `characteristicsDiscovered` events, `noble.addServices()`, `noble.addCharacteristics()`) were removed.
 - Node.js 18 or newer is required.
-- The macOS backend was rewritten in Swift and the Windows backend now reports through promises natively. Both reject requests that 1.x silently dropped (unknown peripheral, undiscovered service or characteristic, adapter not powered on), and the Windows backend now rejects writes and subscriptions whose GATT status is not `Success`.
+- The macOS backend was rewritten in Swift and the Windows backend now reports through promises natively. Both reject requests that 2.x silently dropped (unknown peripheral, undiscovered service or characteristic, adapter not powered on), and the Windows backend now rejects writes and subscriptions whose GATT status is not `Success`.
 
 ## Installation
 
