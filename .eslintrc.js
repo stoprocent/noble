@@ -1,82 +1,59 @@
 module.exports = {
   root: true,
-  extends: [
-    'eslint:recommended',
-    'plugin:node/recommended',
-    'plugin:jest/recommended'
-  ],
-  parser: '@babel/eslint-parser',
+  parser: '@typescript-eslint/parser',
   parserOptions: {
     ecmaVersion: 2022,
-    sourceType: 'module',
-    requireConfigFile: false,
-    ecmaFeatures: {
-      impliedStrict: true
-    }
+    sourceType: 'module'
   },
-  plugins: [
-    'node',
-    'promise',
-    'import',
-    'jest'
+  plugins: ['@typescript-eslint', 'jest'],
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended'
   ],
   env: {
     node: true,
-    es2022: true,
-    jest: true // Changed from mocha to jest
+    es2022: true
   },
-  globals: {
-    Promise: true
-  },
-  settings: {
-    node: {
-      version: '>=16.0.0' // Adjust to your minimum supported Node version
-    },
-    jest: {
-      version: 29 // Update to your Jest version
-    }
-  },
-  ignorePatterns: [
-    'test/**/*', 
-    'node_modules/**/*', 
-    '*.config.js',
-    'coverage/**/*',
-    'dist/**/*',
-    'jest.setup.js' // Add Jest setup file if you have one
-  ],
+  ignorePatterns: ['node_modules/', 'dist/', 'coverage/', 'build/', 'prebuilds/', 'lib/'],
   rules: {
-    // Original rules
+    semi: 'error',
+    quotes: ['error', 'single', { avoidEscape: true }],
     'space-before-function-paren': ['error', 'always'],
-    'no-unused-vars': ['error', { args: 'none' }],
-    'semi': 'error',
-    
-    // Node-specific rules
-    'node/exports-style': ['error', 'module.exports'],
-    'node/file-extension-in-import': ['error', 'always'],
-    'node/prefer-global/buffer': ['error', 'always'],
-    'node/prefer-global/console': ['error', 'always'],
-    'node/prefer-global/process': ['error', 'always'],
-    'node/no-unpublished-require': 'off',
-    
-    // Jest-specific rules
-    'jest/no-disabled-tests': 'warn',
-    'jest/no-focused-tests': 'error',
-    'jest/no-identical-title': 'error',
-    'jest/valid-expect': 'error',
-    
-    // Modern JS
     'prefer-const': 'error',
     'no-var': 'error',
     'object-shorthand': 'error',
-    
-    // Promises
-    'promise/param-names': 'error',
-    'promise/no-return-wrap': 'error',
-    
-    // Import rules
-    'import/no-unresolved': 'error',
-    'import/named': 'error',
-    'import/no-extraneous-dependencies': 'warn',
-    'import/first': 'error'
-  }
+    'no-restricted-imports': ['error', {
+      paths: [
+        { name: 'events', message: 'noble does not use EventEmitter: return a promise, or report through a typed delegate/Signal.' },
+        { name: 'node:events', message: 'noble does not use EventEmitter: return a promise, or report through a typed delegate/Signal.' }
+      ]
+    }],
+    '@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],
+    '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports', disallowTypeAnnotations: false }]
+  },
+  overrides: [
+    {
+      files: ['test/**/*.ts'],
+      extends: ['plugin:jest/recommended'],
+      env: { jest: true },
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'off',
+        '@typescript-eslint/no-require-imports': 'off',
+        '@typescript-eslint/no-unused-vars': 'off',
+        '@typescript-eslint/consistent-type-imports': 'off',
+        'no-restricted-imports': 'off',
+        'jest/no-disabled-tests': 'warn',
+        'jest/no-focused-tests': 'error',
+        'jest/no-identical-title': 'error',
+        'jest/valid-expect': 'error',
+        'jest/expect-expect': 'off',
+        'jest/no-conditional-expect': 'off',
+        'jest/no-done-callback': 'off'
+      }
+    },
+    {
+      files: ['examples/**/*.ts'],
+      rules: { 'no-console': 'off' }
+    }
+  ]
 };

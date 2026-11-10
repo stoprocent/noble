@@ -58,7 +58,9 @@ jobs:
     needs: prebuild
     name: Release
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # `beta` and `alpha` publish pre-releases (e.g. 2.0.0-beta.1) under the npm
+    # dist-tag of the same name; `latest` only ever moves from `main`.
+    if: contains(fromJSON('["refs/heads/main", "refs/heads/beta", "refs/heads/alpha"]'), github.ref)
     permissions:
       contents: write
       id-token: write

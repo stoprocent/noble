@@ -22,20 +22,20 @@ This fork of `noble` was created to introduce several key improvements and new f
    - Overhauled Windows native bindings with support for `Service Data` from advertisements
    - Aligned behavior across different bindings (macOS, Windows, HCI) for consistent behavior 
 
-3. **Modern JavaScript Support**:
-   - Added full Promise-based API with async/await support throughout the library
-   - Implemented async iterators for device discovery with `for await...of` syntax
-   - Refactored codebase to use modern JavaScript patterns and best practices
+3. **Native TypeScript, promise-first API**:
+   - The library is written in strict TypeScript and ships its own type definitions
+   - Every operation returns a promise; there are no callbacks and no `EventEmitter` events
+   - Async iterators for discovery and notifications with `for await...of` syntax
+   - Typed errors (`DisconnectedError`, `ConnectionCancelledError`, ...) instead of hung callbacks
 
 4. **Enhanced Testing and Reliability**:
-   - Migrated tests to Jest for improved coverage and reliability
-   - Added comprehensive TypeScript type definitions
+   - Jest test suite covering the core and every backend
    - Fixed numerous edge cases and stability issues
 
 5. **New Features**: 
    - A `setAddress(...)` function to set the MAC address of the central device
-   - Direct device connection with `connect(...)/connectAsync(...)` without requiring a prior scan
-   - `waitForPoweredOnAsync(...)` function to simplify async workflows
+   - Direct device connection with `noble.connect(...)` without requiring a prior scan
+   - `waitForPoweredOn(...)` function to simplify async workflows
    - Support for multiple adapter configurations through the new `withBindings()` API
    - Extended debugging capabilities and error handling
    - Additionally, I plan to add raw L2CAP channel support, enhancing low-level Bluetooth communication capabilities
@@ -53,210 +53,115 @@ npm install @stoprocent/noble
 
 ## Usage
 
-### TypeScript (Recommended)
+noble is written in TypeScript and ships its own type definitions. The API is
+promise-based throughout: there are no callbacks and no `EventEmitter`.
 
 ```typescript
-// Auto-select based on platform
+// A ready-to-use instance on the default bindings for this platform
 import noble from '@stoprocent/noble';
-// or
+
+// ...or pick the bindings yourself
 import { withBindings } from '@stoprocent/noble';
-// Auto-select based on platform
-const noble = withBindings('default'); // 'hci', 'win', 'mac'
+const noble = withBindings('default'); // 'hci', 'dbus', 'mac', 'win'
 ```
 
-For more detailed examples and API documentation, see [Binding Types](#Binding-Types) below.
-
-### JavaScript
+CommonJS works too:
 
 ```javascript
-const noble = require('@stoprocent/noble');
-// or 
-const { withBindings } = require('@stoprocent/noble');
-const noble = withBindings('default'); // 'hci', 'win', 'mac'
+const { default: noble, withBindings } = require('@stoprocent/noble');
 ```
 
+For the available bindings and their options, see [Binding Types](#binding-types) below.
 
 ## Quick Start Example
 
-### TypeScript Example (Modern Async/Await)
-
-#### Basic Scan
+### Scanning
 
 ```typescript
 import noble from '@stoprocent/noble';
 
-// Discover peripherals as an async generator
-try {
-  // Wait for Adapter poweredOn state
-  await noble.waitForPoweredOnAsync();
+await noble.waitForPoweredOn();
 
-  // discoverAsync starts and owns the scanning session
-  for await (const peripheral of noble.discoverAsync()) {
-    console.log(`Found device: ${peripheral.advertisement.localName || 'Unknown'}`);
-    // Process the peripheral as needed
-    
-    // Optional: stop scanning when a specific device is found
-    if (peripheral.advertisement.localName === 'MyDevice') {
-      break;
-    }
+// discover() starts scanning, yields peripherals as they are found,
+// and stops scanning when you leave the loop.
+for await (const peripheral of noble.discover()) {
+  console.log(`Found device: ${peripheral.advertisement.localName ?? 'Unknown'}`);
+
+  if (peripheral.advertisement.localName === 'MyDevice') {
+    break;
   }
-  
-} catch (error) {
-  console.error('Discovery error:', error);
-  await noble.stopScanningAsync();
 }
 ```
 
-`discoverAsync()` resumes scanning after temporary binding-level pauses, such
-as the Linux HCI binding stopping scan while it connects. Break the loop or
-call `stopScanning()` / `stopScanningAsync()` to end the discovery session.
+`discover()` resumes scanning after temporary binding-level pauses, such as
+the Linux HCI binding stopping the scan while it connects. Leave the loop, or
+call `noble.stopScanning()` / `noble.stop()`, to end the discovery session.
 
-For a more detailed example, please check out [examples/peripheral-explorer.ts](examples/peripheral-explorer.ts)
-
-Alternatively, you can still use the legacy event-based API:
-
-``` javascript
-const noble = require('@stoprocent/noble');
-
-// State change event is emitted when adapter state changes
-noble.on('stateChange', function (state) {
-  if (state === 'poweredOn') {
-    // Start scanning when adapter is ready
-    noble.startScanning();
-  } else {
-    // Stop scanning if adapter becomes unavailable
-    noble.stopScanning();
-  }
-});
-
-// Discover event is emitted when a peripheral is found
-noble.on('discover', peripheral => {
-  console.log(peripheral);
-  // From here you can work with the peripheral:
-  // - Connect to it: peripheral.connect()
-  // - Check advertisement data: peripheral.advertisement
-  // - See signal strength: peripheral.rssi
-});
-```
-
-#### Connecting to the device
-
-``` typescript
-// Stop scan
-await noble.stopScanningAsync();
-// Connect
-await peripheral.connectAsync();
-// Discover
-const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
-```
-
-#### Working with Services and Characteristics
+If you prefer a listener over a loop:
 
 ```typescript
-async function exploreServices(peripheral) {
-  // Discover all services and characteristics at once
-  const { services } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
-  
-  const results = [];
-  
-  for (const service of services) {
-    const serviceInfo = {
-      uuid: service.uuid,
-      characteristics: []
-    };
-    
-    for (const characteristic of service.characteristics) {
-      const characteristicInfo = {
-        uuid: characteristic.uuid,
-        properties: characteristic.properties
-      };
-      
-      // Read the characteristic if it's readable
-      if (characteristic.properties.includes('read')) {
-        characteristicInfo.value = await characteristic.readAsync();
-      }
-      
-      serviceInfo.characteristics.push(characteristicInfo);
+const stopListening = noble.onDiscover(peripheral => console.log(peripheral.id));
+await noble.startScanning({ serviceUuids: ['180f'], allowDuplicates: false });
+// later
+await noble.stopScanning();
+stopListening();
+```
+
+### Connecting and exploring
+
+```typescript
+await peripheral.connect();
+
+const { services } = await peripheral.discoverAllServicesAndCharacteristics();
+
+for (const service of services) {
+  for (const characteristic of service.characteristics ?? []) {
+    console.log(service.uuid, characteristic.uuid, characteristic.properties);
+
+    if (characteristic.properties.includes('read')) {
+      console.log(await characteristic.read());
     }
-    
-    results.push(serviceInfo);
   }
-  
-  return results;
 }
+
+await peripheral.disconnect();
 ```
 
-#### Reading and Writing Data
+### Reading, writing and notifications
 
 ```typescript
-async function readBatteryLevel(peripheral) {
-  // Get battery service (0x180F is the standard UUID for Battery Service)
-  const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+import type { Peripheral } from '@stoprocent/noble';
+
+async function readBatteryLevel (peripheral: Peripheral): Promise<number> {
+  const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristics(
     ['180f'], // Battery Service
-    ['2a19']  // Battery Level Characteristic
+    ['2a19']  // Battery Level
   );
-  
-  if (characteristics.length > 0) {
-    const data = await characteristics[0].readAsync();
-    return data[0]; // Battery percentage
-  }
-  
-  return null;
+  const data = await characteristics[0].read();
+  return data[0];
 }
 
-async function writeCharacteristic(peripheral, serviceUuid, characteristicUuid, data) {
-  const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
-    [serviceUuid], 
-    [characteristicUuid]
-  );
-  
-  if (characteristics.length > 0) {
-    // false = with response, true = without response
-    const requiresResponse = !characteristics[0].properties.includes('writeWithoutResponse');
-    await characteristics[0].writeAsync(data, !requiresResponse);
-    return true;
-  }
-  
-  return false;
+// Write with response (default) or without
+await characteristic.write(Buffer.from([0x01]));
+await characteristic.write(Buffer.from([0x01]), true);
+
+// Stream notifications; subscribes on entry and unsubscribes when the loop is left
+for await (const data of characteristic.notifications()) {
+  console.log('Notified:', data);
 }
 ```
 
-### JavaScript Example (Battery Level)
-
-```javascript
-const { withBindings } = require('@stoprocent/noble');
-
-// Read the battery level of the first found peripheral exposing the Battery Level characteristic
-async function readBatteryLevel() {
-  const noble = withBindings('default');
-
-  try {
-    await noble.waitForPoweredOnAsync();
-    await noble.startScanningAsync(['180f'], false);
-    
-    noble.on('discover', async (peripheral) => {
-      await noble.stopScanningAsync();
-      await peripheral.connectAsync();
-      
-      const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(['180f'], ['2a19']);
-      const batteryLevel = (await characteristics[0].readAsync())[0];
-
-      console.log(`${peripheral.address} (${peripheral.advertisement.localName}): ${batteryLevel}%`);
-
-      await peripheral.disconnectAsync();
-      process.exit(0);
-    });
-  } catch (error) {
-    console.error(error);
-  }
-}
-
-readBatteryLevel();
-```
+More complete programs live in [examples/](examples), e.g.
+[examples/peripheral-explorer.ts](examples/peripheral-explorer.ts). After
+`npm run build` they can be run with any TypeScript runner, for instance
+`npx tsx examples/peripheral-explorer.ts`.
 
 ## API Overview
 
-Noble provides both callback-based and Promise-based (Async) APIs:
+Every operation returns a promise. Things that happen without being asked for
+(state changes, discoveries, disconnects, notifications) are delivered either
+through async iterators or through typed `onX(listener)` methods, each of which
+returns a function that removes the listener again.
 
 ### Binding Types
 
@@ -274,7 +179,7 @@ const nobleMac = withBindings('mac');   // macOS binding
 const nobleWin = withBindings('win');   // Windows binding
 
 // Custom options for HCI binding (Using UART HCI Dongle)
-const nobleCustom = withBindings('hci', { 
+const nobleUart = withBindings('hci', {
   hciDriver: 'uart',
   bindParams: {
     uart: {
@@ -285,7 +190,7 @@ const nobleCustom = withBindings('hci', {
 });
 
 // Custom options for HCI binding (Native)
-const nobleCustom = withBindings('hci', { 
+const nobleNative = withBindings('hci', {
   hciDriver: 'native',
   deviceId: 0 // This could be also set by env.NOBLE_HCI_DEVICE_ID=0
 });
@@ -300,91 +205,109 @@ const nobleCustom = withBindings('hci', {
 // Supports basic GATT: scan, connect, service/characteristic/descriptor
 // discovery, read, write, notify/indicate. Does not support raw HCI handle
 // I/O, custom scan parameters, or vendor-specific commands.
-const nobleDbus = withBindings('dbus', {
-  adapterId: 'hci0' // optional; defaults to the first BlueZ adapter
+const nobleBluez = withBindings('dbus', {
+  adapterId: 'hci0' // optional; defaults to hci<NOBLE_HCI_DEVICE_ID>, else the first BlueZ adapter
 });
 
 // Equivalent to withBindings('dbus') without code changes:
 //   NOBLE_BINDINGS=dbus node app.js
 ```
 
-### Core Methods
+### Noble
 
 ```typescript
-// Wait for adapter to be powered on
-await noble.waitForPoweredOnAsync(timeout?: number);
+noble.state;    // 'poweredOn' | 'poweredOff' | 'unauthorized' | 'unsupported' | 'unknown' | 'resetting'
+noble.address;  // adapter address, 'unknown' until reported
 
-// Start scanning
-await noble.startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean);
+// Wait for the adapter to be powered on (rejects with TimeoutError)
+await noble.waitForPoweredOn(timeout?: number);
 
-// Stop scanning
-await noble.stopScanningAsync();
+// Scan
+await noble.startScanning({ serviceUuids?: string[], allowDuplicates?: boolean });
+await noble.stopScanning();
 
-// Discover peripherals as an async generator. This starts scanning and
-// resumes temporary binding-level scan pauses until the loop is stopped.
-for await (const peripheral of noble.discoverAsync()) {
-  // handle each discovered peripheral
-}
+// Scan as an async generator. Starts scanning and resumes temporary
+// binding-level scan pauses until the loop is left or scanning is stopped.
+for await (const peripheral of noble.discover({ serviceUuids, allowDuplicates })) { /* ... */ }
 
-// Connect directly to a peripheral by ID or address
-const peripheral = await noble.connectAsync(idOrAddress, options?);
+// Connect directly to a peripheral by id or address, without scanning
+const peripheral = await noble.connect(idOrAddress, options?);
+noble.cancelConnect(idOrAddress);
 
-// Pair with a peripheral by ID or address (Windows only — see "Pairing" below)
-await noble.pairAsync(idOrAddress);
+// Pair with a peripheral by id or address (Windows only — see "Pairing" below)
+await noble.pair(idOrAddress);
+const paired = await noble.isPaired(idOrAddress);
 
-// Set adapter address (HCI only on supported devices)
+// Set adapter address (HCI only, on supported devices)
 noble.setAddress('00:11:22:33:44:55');
 
-// Reset adapter
-noble.reset();
+// Set scan interval/window (HCI only)
+await noble.setScanParameters(interval, window);
 
-// Stop noble
+// Reset adapter / stop noble
+noble.reset();
 noble.stop();
+
+// Listeners — each returns an unsubscribe function
+noble.onStateChange(state => { /* ... */ });
+noble.onAddressChange(address => { /* ... */ });
+noble.onScanStart(() => { /* ... */ });
+noble.onScanStop(() => { /* ... */ });
+noble.onDiscover(peripheral => { /* ... */ });
+noble.onWarning(message => { /* ... */ }); // console.warn is used while nobody listens
 ```
 
-### Peripheral Methods
+### Peripheral
 
 ```typescript
-// Connect to peripheral
-await peripheral.connectAsync();
+peripheral.id; peripheral.address; peripheral.addressType;
+peripheral.advertisement; peripheral.rssi; peripheral.connectable; peripheral.scannable;
+peripheral.state;    // 'disconnected' | 'connecting' | 'connected' | 'disconnecting' | 'error'
+peripheral.mtu;      // number | null
+peripheral.services; // result of the last discoverServices(), or null
 
-// Disconnect from peripheral
-await peripheral.disconnectAsync();
+await peripheral.connect(options?);
+peripheral.cancelConnect();        // the pending connect() rejects with ConnectionCancelledError
+await peripheral.disconnect();
 
 // Pair with peripheral (Windows only — see "Pairing" below)
-await peripheral.pairAsync();
+await peripheral.pair();          // or peripheral.pair({ pin: '123456' })
+const paired = await peripheral.isPaired();
 
-// Update RSSI
-const rssi = await peripheral.updateRssiAsync();
+const rssi = await peripheral.updateRssi();
 
-// Discover services
-const services = await peripheral.discoverServicesAsync(['180f']); // Optional service UUIDs
+const services = await peripheral.discoverServices(['180f']); // UUID filter is optional
+const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristics();
+const { services, characteristics } = await peripheral.discoverSomeServicesAndCharacteristics(['180f'], ['2a19']);
 
-// Discover all services and characteristics
-const { services, characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
+// Raw ATT handles (HCI and native bindings)
+const data = await peripheral.readHandle(handle);
+await peripheral.writeHandle(handle, data, withoutResponse);
 
-// Discover specific services and characteristics
-const { services, characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
-  ['180f'], ['2a19']
-);
-
-// Read and write handles
-const data = await peripheral.readHandleAsync(handle);
-await peripheral.writeHandleAsync(handle, data, withoutResponse);
+// Listeners — each returns an unsubscribe function
+peripheral.onDisconnect(reason => { /* ... */ });
+peripheral.onMtuChange(mtu => { /* ... */ });
+peripheral.onHandleNotification(({ handle, data }) => { /* ... */ });
 ```
+
+Any operation that is still in flight when the link drops rejects with a
+`DisconnectedError` carrying the `reason`.
+
+On macOS, a `connect()` that fails, or whose attempt is ended by a disconnect
+before the link is up, rejects with an `Error` whose message is the
+CoreBluetooth description and which also carries `nativeErrorDomain` (string)
+and `nativeErrorCode` (number), e.g. `CBErrorDomain` / `14` when the peer
+removed its pairing information (type `NativeErrorDetails`).
 
 The Linux HCI binding reports controller disconnect reasons as numeric HCI
 status codes. Other bindings and library cleanup paths may report a string.
 Use `hciStatusMessage` when a human-readable HCI message is needed:
 
 ```typescript
-import noble, { hciStatusMessage } from '@stoprocent/noble';
+import { hciStatusMessage } from '@stoprocent/noble';
 
-peripheral.on('disconnect', reason => {
-  const message = typeof reason === 'number'
-    ? hciStatusMessage(reason)
-    : reason;
-  console.log(`Disconnected: ${message}`);
+peripheral.onDisconnect(reason => {
+  console.log(`Disconnected: ${hciStatusMessage(reason)}`);
 });
 ```
 
@@ -393,112 +316,154 @@ peripheral.on('disconnect', reason => {
 ```typescript
 import noble, {
   DevicePairingKinds,
-  DevicePairingProtectionLevel,
+  DevicePairingProtectionLevel
 } from '@stoprocent/noble';
 
-// Pair at the Noble level (by ID or address) or on a Peripheral instance.
-await noble.pairAsync(idOrAddress);
+// Pair at the Noble level (by id or address) or on a Peripheral instance.
+await noble.pair(idOrAddress);
 // or
-await peripheral.pairAsync();
+await peripheral.pair();
 
 // Optionally choose pairing ceremony + protection level (Windows only).
-await noble.pairAsync(
+await noble.pair(
   idOrAddress,
   DevicePairingKinds.ConfirmOnly,
   DevicePairingProtectionLevel.EncryptionAndAuthentication
 );
 
-// Callback form is also available on both.
-noble.pair(idOrAddress, error => { /* ... */ });
-peripheral.pair(error => { /* ... */ });
+// The same choices as an options object.
+await peripheral.pair({ kind: DevicePairingKinds.DisplayPin });
 
-// The pairing outcome is emitted on the peripheral, and (subject, error)
-// on Noble, mirroring other events.
-peripheral.on('pair', error => { /* error is null on success */ });
-noble.on('pair', (peripheral, error) => { /* ... */ });
+// Supply a PIN for authenticated ProvidePin / ConfirmPinMatch pairing.
+await peripheral.pair({ pin: '123456' });
+await noble.pair(idOrAddress, { pin: '123456' });
+
+// A connected peripheral can be checked first, to skip asking for a PIN.
+if (!(await peripheral.isPaired())) { // or: await noble.isPaired(idOrAddress)
+  // ask for the PIN, then pair
+}
 ```
+
+The `pair` promise resolves when pairing succeeded (or the device was already
+paired) and rejects otherwise.
 
 **Platform support and limitations — please read before using pairing:**
 
 - **Windows only.** Pairing is implemented solely by the Windows (WinRT)
-  binding. On macOS, Linux, and other bindings `pair`/`pairAsync` does not
-  attempt a native call — it rejects/returns a deterministic
-  `'Pairing is not supported on this platform'` error so callers do not hang.
+  binding. On macOS, Linux, and other bindings `pair` does not attempt a
+  native call — it rejects with a `NotSupportedError`
+  (`'Pairing is not supported on this platform'`) so callers do not hang.
 - **A connected device is required.** The peripheral must already be
-  discovered and connected (present in Noble's peripheral map) before pairing
-  is requested. Pairing an unknown/untracked id fails rather than hanging.
+  discovered and connected before pairing is requested.
 - **Windows pairing options.** `kind` defaults to `ConfirmOnly` and
   `protectionLevel` defaults to `Encryption`. You can pass a
   `DevicePairingKinds` bitmask (single or OR-ed values) and (optionally)
   `DevicePairingProtectionLevel`.
-  `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI;
-  PIN/password kinds (`ProvidePin`, `ProvidePassword`, `ConfirmPassword`) are
-  rejected because this library does not collect secrets to pass into WinRT.
+  The same values can be given as `pair({ kind, protectionLevel })`.
+  `ConfirmOnly`, `DisplayPin`, and `ConfirmPinMatch` use Windows' native UI.
+  `ProvidePin` is rejected unless a PIN is supplied (see below), and the
+  password kinds (`ProvidePassword`, `ConfirmPassword`) are always rejected:
+  this library has no way to pass a password into WinRT.
+- **PIN pairing.** `pair({ pin })` takes the PIN shown by, or configured on,
+  the peripheral as a non-empty string. `kind` then defaults to
+  `ConfirmOnly | ProvidePin | ConfirmPinMatch` and `protectionLevel` to
+  `EncryptionAndAuthentication`, the only level accepted together with a PIN.
+  The PIN answers a `ProvidePin` request; a `ConfirmPinMatch` request is
+  accepted only when the PIN Windows presents equals the supplied one, and
+  pairing fails otherwise. A PIN that is not a non-empty string, or one
+  combined with another protection level, rejects with a `TypeError` before
+  anything is sent. The PIN's format is not checked. noble never logs the
+  PIN; collecting and storing it safely is up to the application.
+- **`isPaired()` reports Windows' pairing state.** It resolves `true` when
+  Windows reports the connected device as paired. On the Windows binding it
+  rejects when the peripheral is unknown or not connected; on every other
+  binding it resolves `false`, because they expose no pairing state.
 
-### Service Methods
+### Service
 
 ```typescript
-// Discover included services
-const includedServiceUuids = await service.discoverIncludedServicesAsync([serviceUUIDs]);
+service.uuid; service.name; service.type;
+service.characteristics;      // result of the last discoverCharacteristics(), or null
+service.includedServiceUuids; // result of the last discoverIncludedServices(), or null
 
-// Discover characteristics
-const characteristics = await service.discoverCharacteristicsAsync([characteristicUUIDs]);
+const includedServiceUuids = await service.discoverIncludedServices(serviceUuids?);
+const characteristics = await service.discoverCharacteristics(characteristicUuids?);
 ```
 
-### Characteristic Methods
-
-> **Note:** The `data` event is the primary event for handling both read responses and notifications. When using the event-based approach, you can differentiate between read responses and notifications using the `isNotification` parameter. The previously used `read` event **has been deprecated and removed**. Instead, use the `data` event with `isNotification=false` to identify read responses.
+### Characteristic
 
 ```typescript
-// Read characteristic value
-const data = await characteristic.readAsync();
+characteristic.uuid; characteristic.name; characteristic.type;
+characteristic.properties;  // e.g. ['read', 'notify']
+characteristic.descriptors; // result of the last discoverDescriptors(), or null
+characteristic.isNotifying;
 
-// Write characteristic value
-await characteristic.writeAsync(data, withoutResponse);
+const data = await characteristic.read();
+await characteristic.write(data, withoutResponse?);
 
-// Subscribe to notifications
-await characteristic.subscribeAsync();
+// Notifications / indications
+await characteristic.subscribe();
+const stopListening = characteristic.onNotification(data => { /* ... */ });
+await characteristic.unsubscribe();
 
-// Unsubscribe from notifications
-await characteristic.unsubscribeAsync();
-
-// Receive notifications using async iterator
-for await (const data of characteristic.notificationsAsync()) {
+// ...or as an async iterator that subscribes and unsubscribes for you
+for await (const data of characteristic.notifications()) {
   console.log(`Received notification: ${data}`);
 }
 
-// Discover descriptors
-const descriptors = await characteristic.discoverDescriptorsAsync();
+const descriptors = await characteristic.discoverDescriptors();
+await characteristic.broadcast(true); // HCI only
 ```
 
-### Characteristic Events
+### Descriptor
 
 ```typescript
-// Receive data (both read responses and notifications)
-characteristic.on('data', (data: Buffer, isNotification: boolean) => {
-  console.log(`Received ${isNotification ? 'notification' : 'read response'}: ${data}`);
-});
-
-// Write completion 
-characteristic.on('write', (error: Error | undefined) => {
-  console.log('Write completed');
-});
-
-// Descriptor discovery
-characteristic.on('descriptorsDiscover', (descriptors: Descriptor[]) => {
-  console.log('Descriptors discovered');
-});
+const value = await descriptor.readValue();
+await descriptor.writeValue(data);
 ```
 
-### Descriptor Methods
+### Errors
 
-```typescript
-// Read descriptor value
-const value = await descriptor.readValueAsync();
+All errors raised deliberately by noble extend `NobleError`:
 
-// Write descriptor value
-await descriptor.writeValueAsync(data);
-```
+| Error | Raised when |
+| ----- | ----------- |
+| `DisconnectedError` | the link dropped while an operation was in flight (`.reason`) |
+| `ConnectionCancelledError` | `cancelConnect()` abandoned a pending `connect()` |
+| `AdapterStateError` | an operation needed the adapter powered on (`.state`) |
+| `NotSupportedError` | the active bindings cannot perform the operation |
+| `TimeoutError` | `waitForPoweredOn()` timed out |
+
+## Migrating from 2.x
+
+3.0 is a ground-up TypeScript rewrite. The callback API and all
+`EventEmitter` events are gone; what remains is the promise API, without the
+`Async` suffix.
+
+| 2.x | 3.x |
+| --- | --- |
+| `const noble = require('@stoprocent/noble')` | `const { default: noble } = require('@stoprocent/noble')` (or `import noble from ...`) |
+| `xxxAsync(...)` | `xxx(...)` — e.g. `peripheral.connectAsync()` → `peripheral.connect()` |
+| `xxx(..., callback)` | removed — `await xxx(...)` |
+| `noble.startScanningAsync(uuids, allowDuplicates)` | `noble.startScanning({ serviceUuids, allowDuplicates })` |
+| `noble.discoverAsync()` | `noble.discover(options?)` |
+| `noble.on('stateChange' \| 'discover' \| 'scanStart' \| 'scanStop' \| 'warning', fn)` | `noble.onStateChange(fn)`, `onDiscover(fn)`, `onScanStart(fn)`, `onScanStop(fn)`, `onWarning(fn)` |
+| `noble.once(...)` / `removeListener(...)` | call the function returned by `onX(fn)` to unsubscribe |
+| `peripheral.on('disconnect', fn)` / `on('mtu', fn)` | `peripheral.onDisconnect(fn)` / `peripheral.onMtuChange(fn)` |
+| `peripheral.on('connect' \| 'rssiUpdate' \| 'servicesDiscover' \| 'pair', fn)` | removed — use the result of the corresponding promise |
+| `characteristic.on('data', (data, isNotification) => ...)` | `characteristic.onNotification(fn)` or `for await (... of characteristic.notifications())`; reads are returned by `read()` |
+| `characteristic.notificationsAsync()` | `characteristic.notifications()` |
+| `peripheral.uuid` | `peripheral.id` |
+| `String` rejections / hung callbacks on failure | typed errors (see [Errors](#errors)); ATT failures on the HCI bindings now reject instead of hanging |
+
+Other behavioural changes worth knowing about:
+
+- An operation interrupted by a disconnect always rejects with `DisconnectedError`.
+- `peripheral.disconnect()` on a peripheral that is not connected resolves immediately.
+- On the HCI bindings a characteristic/descriptor read that the peripheral answers with an ATT error now rejects (2.x resolved with an empty buffer).
+- The undocumented GATT handle-cache hooks (`servicesDiscovered` / `characteristicsDiscovered` events, `noble.addServices()`, `noble.addCharacteristics()`) were removed.
+- Node.js 18 or newer is required.
+- The macOS backend was rewritten in Swift and the Windows backend now reports through promises natively. Both reject requests that 2.x silently dropped (unknown peripheral, undiscovered service or characteristic, adapter not powered on), and the Windows backend now rejects writes and subscriptions whose GATT status is not `Success`.
 
 ## Installation
 
@@ -552,7 +517,8 @@ import noble from '@stoprocent/noble';
 
 #### OS X
 
- * Install [Xcode](https://itunes.apple.com/ca/app/xcode/id497799835?mt=12)
+ * macOS 11 or newer. Prebuilt binaries (x64 and arm64) are included, so nothing has to be compiled for a normal install.
+ * To build the addon from source you need [Xcode](https://itunes.apple.com/ca/app/xcode/id497799835?mt=12) or the Xcode Command Line Tools: the CoreBluetooth backend is written in Swift (with a small C++ N-API layer) and is compiled with `swiftc` as part of `node-gyp rebuild`.
  * On newer versions of OSX, allow bluetooth access on the terminal app: "System Preferences" —> "Security & Privacy" —> "Bluetooth" -> Add terminal app (see [Sandboxed terminal](#sandboxed-terminal))
 
 #### Linux
@@ -756,7 +722,7 @@ The following environment variables can configure noble's behavior:
 
 | Variable | Purpose | Default | Example |
 |----------|---------|---------|---------|
-| NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use | 0 | `export NOBLE_HCI_DEVICE_ID=1` |
+| NOBLE_HCI_DEVICE_ID | Specify which HCI adapter to use (HCI socket and D-Bus bindings) | 0 (D-Bus: the first BlueZ adapter) | `export NOBLE_HCI_DEVICE_ID=1` |
 | HCI_CHANNEL_USER | Use the exclusive Linux HCI user channel | false | `export HCI_CHANNEL_USER=1` |
 | NOBLE_CODED_PHY | Offer LE Coded PHY for connections (long range, lower throughput; requires controller support) | false | `export NOBLE_CODED_PHY=1` |
 | NOBLE_REPORT_ALL_HCI_EVENTS | Report HCI events without waiting for scan response | false | `export NOBLE_REPORT_ALL_HCI_EVENTS=1` |

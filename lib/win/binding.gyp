@@ -6,8 +6,7 @@
     {
       'target_name': 'binding',
       'sources': [ 
-        "<!@(node -p \"require('fs').readdirSync('src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'src/'+f).join(' ')\")",
-        "<!@(node -p \"require('fs').readdirSync('../common/src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'../common/src/'+f).join(' ')\")"
+        "<!@(node -p \"require('fs').readdirSync('src').filter(f=>new RegExp('.*\\\\.(c|cc|cpp)$').test(f)).map(f=>'src/'+f).join(' ')\")"
       ],
       'include_dirs': [
         "<!(node -p \"require('node-addon-api').include_dir\")",

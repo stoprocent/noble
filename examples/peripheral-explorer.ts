@@ -1,52 +1,109 @@
-import { withBindings } from "@stoprocent/noble";
+import noble, { type ConnectOptions, type Peripheral } from '@stoprocent/noble';
 
-const address = process.argv[2]?.toLowerCase() || '11:22:44:55:99:77';
-const noble = withBindings('default');
+// Connects to a peripheral and prints its services, characteristics,
+// descriptors and readable values.
+//
+//   usage: peripheral-explorer <direct: 0|1> <id-or-address> [addressType: public|random]
+//
+// With direct=1 the peripheral is connected by id/address without scanning.
 
-await noble.waitForPoweredOnAsync();
-console.log('noble started');
+const direct = process.argv[2] === '1';
+const target = (process.argv[3] ?? 'cd:6b:86:03:39:40').toLowerCase();
+const addressType = (process.argv[4] ?? 'random') as ConnectOptions['addressType'];
 
-for await (const peripheral of noble.discoverAsync()) {
-    if ([peripheral.id, peripheral.address].includes(address) === false) {
-        continue;
+const CONNECT_TIMEOUT = 5000;
+const startTime = Date.now();
+
+async function find (): Promise<Peripheral | undefined> {
+  for await (const peripheral of noble.discover()) {
+    if (peripheral.id === target || peripheral.address === target) {
+      return peripheral;
     }
-
-    await noble.stopScanningAsync();
-    console.log('peripheral', peripheral.address || peripheral.id);
-    console.log('discovered', peripheral.advertisement);    
-
-    await peripheral.connectAsync();
-    console.log('connected');
-
-    const { services } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
-
-    for (const service of services) {
-        console.log('Service\x1b[34m', service.uuid, '\x1b[0m');
-        for (const characteristic of service.characteristics) {
-            
-            console.log('  | Characteristic\x1b[32m', characteristic.uuid, '\x1b[0m');
-            console.log('  |  | Type:', characteristic.type);
-            console.log('  |  | Properties:', characteristic.properties);
-
-            if (characteristic.properties.includes('read')) {
-                let value = await characteristic.readAsync();
-                console.log(`  |  | Value: 0x${value.toString('hex')}`);
-            }
-            
-            const descriptors = await characteristic.discoverDescriptorsAsync();
-            for (const descriptor of descriptors) {
-                console.log('  |  | Descriptor\x1b[33m', descriptor.uuid, '\x1b[0m');
-                const value = await descriptor.readValueAsync();
-                console.log(`  |  |  | Value: 0x${value.toString('hex')}`);
-            }
-        }
-    }
-
-    await peripheral.disconnectAsync();
-    console.log('disconnected');
-
-    break;
+    console.log(`Peripheral ${peripheral.id} (${peripheral.advertisement.localName}) ignored`);
+  }
+  return undefined;
 }
 
-noble.stop();
-console.log('noble stopped');
+async function connect (): Promise<Peripheral | undefined> {
+  if (direct) {
+    // Give up on the attempt if the peripheral does not answer in time.
+    const timer = setTimeout(() => noble.cancelConnect(target), CONNECT_TIMEOUT);
+    try {
+      return await noble.connect(target, { addressType });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const peripheral = await find();
+  if (peripheral) {
+    const timer = setTimeout(() => peripheral.cancelConnect(), CONNECT_TIMEOUT);
+    try {
+      await peripheral.connect();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return peripheral;
+}
+
+async function explore (peripheral: Peripheral): Promise<void> {
+  peripheral.onDisconnect(reason => console.log('Disconnected', reason));
+  peripheral.onMtuChange(mtu => console.log('MTU updated:', mtu));
+
+  console.log(`Connected to ${peripheral.id} (${peripheral.advertisement.localName ?? 'no name'})`);
+  console.log('RSSI', await peripheral.updateRssi());
+  console.log('Services and characteristics:');
+
+  for (const service of await peripheral.discoverServices()) {
+    console.log(service.name ? `${service.uuid} (${service.name})` : service.uuid);
+
+    for (const characteristic of await service.discoverCharacteristics()) {
+      let info = `  ${characteristic.uuid}`;
+      if (characteristic.name) {
+        info += ` (${characteristic.name})`;
+      }
+
+      const descriptors = await characteristic.discoverDescriptors();
+      const userDescription = descriptors.find(descriptor => descriptor.uuid === '2901');
+      if (userDescription) {
+        info += ` (${await userDescription.readValue()})`;
+      }
+
+      info += `\n    properties  ${characteristic.properties.join(', ')}`;
+
+      if (characteristic.properties.includes('read')) {
+        const data = await characteristic.read();
+        info += `\n    value       ${data.toString('hex')} | '${data.toString('ascii')}'`;
+      }
+
+      console.log(info);
+    }
+  }
+
+  console.log(`Time taken: ${Date.now() - startTime}ms`);
+}
+
+async function main (): Promise<void> {
+  await noble.waitForPoweredOn();
+
+  const peripheral = await connect();
+  if (!peripheral) {
+    console.log('Peripheral not found');
+    return;
+  }
+  try {
+    await explore(peripheral);
+  } finally {
+    await peripheral.disconnect();
+  }
+}
+
+process.once('SIGINT', () => noble.stop());
+
+main()
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => noble.stop());

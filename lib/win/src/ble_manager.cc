@@ -1,5 +1,9 @@
 #include "ble_manager.h"
+#include "napi_winrt.h"
 #include "winrt_cpp.h"
+
+#include <algorithm>
+#include <utility>
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.Streams.h>
@@ -29,28 +33,11 @@ template <typename T> auto inFilter(std::vector<T> filter, T object)
     return filter.empty() || std::find(filter.begin(), filter.end(), object) != filter.end();
 }
 
-template <typename O, typename M, class... Types> auto bind2(O* object, M method, Types&... args)
-{
-    return std::bind(method, object, std::placeholders::_1, std::placeholders::_2, args...);
-}
-
 #define LOGE(message, ...) printf(__FUNCTION__ ": " message "\n", __VA_ARGS__)
 
-#define CHECK_DEVICE()                                     \
-    if (mDeviceMap.find(uuid) == mDeviceMap.end())         \
-    {                                                      \
-        LOGE("device with id %s not found", uuid.c_str()); \
-        return false;                                      \
-    }
-
-#define IFDEVICE(_device, _uuid)                     \
-    PeripheralWinrt& peripheral = mDeviceMap[_uuid]; \
-    if (!peripheral.device.has_value())              \
-    {                                                \
-        LOGE("device not connected");                \
-        return false;                                \
-    }                                                \
-    BluetoothLEDevice& _device = *peripheral.device;
+// Rejection messages for requests that outlive their link.
+static const char* const kDisconnected = "peripheral disconnected";
+static const char* const kConnectCanceled = "connection canceled!";
 
 std::string gattStatusToString(GattCommunicationStatus status) {
     switch (status) {
@@ -104,15 +91,37 @@ std::string asyncStatusToString(AsyncStatus status) {
     } while (0)
 
 
-#define FOR(object, vector)       \
-    auto _vector = vector;       \
-    if (!_vector)                 \
-    {                             \
-        LOGE(#vector " is null"); \
-        return;                   \
-    }                             \
-    else                          \
+// Iterates a WinRT collection; a null collection fails the request.
+#define FOR(object, vector, _fail)        \
+    auto _vector = vector;                \
+    if (!_vector)                         \
+    {                                     \
+        LOGE(#vector " is null");         \
+        _fail(std::string(#vector " is null")); \
+        return;                           \
+    }                                     \
+    else                                  \
         for (auto&& object : _vector)
+
+// GetResults() throws unless the operation completed, so only ask for the
+// result then; CHECK_STATUS_AND_RESULT reports the other states.
+template <typename T> T resultsOrNull(const IAsyncOperation<T>& asyncOp, AsyncStatus status)
+{
+    T result{ nullptr };
+    if (status == AsyncStatus::Completed)
+    {
+        result = asyncOp.GetResults();
+    }
+    return result;
+}
+
+static Data readBuffer(const IBuffer& value)
+{
+    auto reader = DataReader::FromBuffer(value);
+    Data data(reader.UnconsumedBufferLength());
+    reader.ReadBytes(data);
+    return data;
+}
 
 struct ServiceDataTypeInfo {
     uint8_t dataType;
@@ -134,17 +143,137 @@ const std::vector<ServiceDataTypeInfo> serviceDataTypes = {
     }
 };
 
-BLEManager::BLEManager(const Napi::Value& receiver, const Napi::Function& callback)
+BLEManager::BLEManager(std::shared_ptr<noble::JsBridge> bridge)
+    : mBridge(std::move(bridge)), mAlive(std::make_shared<std::atomic<bool>>(true))
 {
     mRadioState = AdapterState::Initial;
-    mEmit.Wrap(receiver, callback);
     auto onRadio = std::bind(&BLEManager::OnRadio, this, std::placeholders::_1, std::placeholders::_2);
     mWatcher.Start(onRadio);
     mAdvertismentWatcher.ScanningMode(BluetoothLEScanningMode::Active);
-    auto onReceived = bind2(this, &BLEManager::OnScanResult);
+    auto onReceived = Bind(&BLEManager::OnScanResult);
     mReceivedRevoker = mAdvertismentWatcher.Received(winrt::auto_revoke, onReceived);
-    auto onStopped = bind2(this, &BLEManager::OnScanStopped);
+    auto onStopped = Bind(&BLEManager::OnScanStopped);
     mStoppedRevoker = mAdvertismentWatcher.Stopped(winrt::auto_revoke, onStopped);
+}
+
+BLEManager::~BLEManager()
+{
+    // Tell every WinRT handler created by Bind() (and the peripherals' lookup
+    // callbacks) that the manager is going away before any member is
+    // destroyed; completions that arrive from now on are ignored. The requests
+    // they belonged to are rejected by JsBridge::close(), which stop() calls
+    // right after this destructor returns.
+    mAlive->store(false);
+
+    // Stop delivering advertisements before the members they touch are destroyed.
+    mReceivedRevoker.revoke();
+    mStoppedRevoker.revoke();
+}
+
+// --- request bookkeeping -----------------------------------------------------
+
+void BLEManager::Resolve(noble::RequestId requestId, noble::JsBridge::ValueFactory value)
+{
+    {
+        std::lock_guard<std::mutex> lock(mPendingMutex);
+        mPending.erase(requestId);
+    }
+    mBridge->resolve(requestId, std::move(value));
+}
+
+void BLEManager::Reject(noble::RequestId requestId, const std::string& message)
+{
+    {
+        std::lock_guard<std::mutex> lock(mPendingMutex);
+        mPending.erase(requestId);
+    }
+    mBridge->reject(requestId, message);
+}
+
+void BLEManager::Track(noble::RequestId requestId, const std::string& uuid, bool isConnect)
+{
+    std::lock_guard<std::mutex> lock(mPendingMutex);
+    mPending[requestId] = PendingRequest{ uuid, isConnect };
+}
+
+bool BLEManager::IsPending(noble::RequestId requestId)
+{
+    std::lock_guard<std::mutex> lock(mPendingMutex);
+    return mPending.find(requestId) != mPending.end();
+}
+
+void BLEManager::RejectPending(const std::string& uuid, const std::string& message,
+                               const std::string& connectMessage)
+{
+    std::vector<std::pair<noble::RequestId, bool>> requests;
+    {
+        std::lock_guard<std::mutex> lock(mPendingMutex);
+        for (auto it = mPending.begin(); it != mPending.end();)
+        {
+            if (it->second.uuid == uuid)
+            {
+                requests.push_back(std::make_pair(it->first, it->second.isConnect));
+                it = mPending.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+    for (const auto& request : requests)
+    {
+        mBridge->reject(request.first, request.second ? connectMessage : message);
+    }
+}
+
+PeripheralWinrt* BLEManager::ConnectedPeripheral(noble::RequestId requestId,
+                                                 const std::string& uuid)
+{
+    auto it = mDeviceMap.find(uuid);
+    if (it == mDeviceMap.end())
+    {
+        LOGE("device with id %s not found", uuid.c_str());
+        Reject(requestId, "peripheral " + uuid + " not found");
+        return nullptr;
+    }
+    if (!it->second.device.has_value())
+    {
+        LOGE("device not connected");
+        Reject(requestId, "peripheral " + uuid + " is not connected");
+        return nullptr;
+    }
+    Track(requestId, uuid);
+    // The peripheral's own (asynchronous) GATT lookups observe the same
+    // liveness flag as the handlers created by Bind().
+    it->second.managerAlive = mAlive;
+    return &it->second;
+}
+
+// --- unsolicited activity ----------------------------------------------------
+
+void BLEManager::NotifyDiscover(const std::string& uuid, int rssi, const Peripheral& peripheral)
+{
+    // Copy the plain advertisement data (not the WinRT handles of a
+    // PeripheralWinrt); the object is built later, on the JS thread.
+    Peripheral data = peripheral;
+    mBridge->notify("onDiscover", [uuid, rssi, data](Napi::Env env) {
+        return std::vector<napi_value>{ toDiscoveredPeripheral(env, uuid, rssi, data) };
+    });
+}
+
+void BLEManager::NotifyDisconnect(const std::string& uuid, const std::string& reason)
+{
+    mBridge->notify("onDisconnect", [uuid, reason](Napi::Env env) {
+        return std::vector<napi_value>{ toUuid(env, uuid), Napi::String::New(env, reason) };
+    });
+}
+
+void BLEManager::NotifyMtu(const std::string& uuid, int mtu)
+{
+    mBridge->notify("onMtu", [uuid, mtu](Napi::Env env) {
+        return std::vector<napi_value>{ toUuid(env, uuid), Napi::Number::New(env, mtu) };
+    });
 }
 
 void BLEManager::OnRadio(Radio& radio, const AdapterCapabilities& capabilities)
@@ -157,33 +286,49 @@ void BLEManager::OnRadio(Radio& radio, const AdapterCapabilities& capabilities)
     if (state != mRadioState)
     {
         mRadioState = state;
-        mEmit.RadioState(adapterStateToString(state));
+        std::string name = adapterStateToString(state);
+        mBridge->notify("onStateChange", [name](Napi::Env env) {
+            return std::vector<napi_value>{ Napi::String::New(env, name) };
+        });
     }
     if (capabilities.bluetoothAddress > 0)
     {
-        mEmit.Address(formatBluetoothAddress(capabilities.bluetoothAddress));
+        std::string address = formatBluetoothAddress(capabilities.bluetoothAddress);
+        mBridge->notify("onAddressChange", [address](Napi::Env env) {
+            return std::vector<napi_value>{ Napi::String::New(env, address) };
+        });
     }
 }
 
-void BLEManager::Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates)
+// --- scanning ----------------------------------------------------------------
+
+void BLEManager::Scan(noble::RequestId requestId, const std::vector<winrt::guid>& serviceUUIDs,
+                      bool allowDuplicates)
 {
-    mAdvertismentMap.clear();
-    mAllowDuplicates = allowDuplicates;
-    mScanServiceUUIDs = serviceUUIDs;
+    Attempt(requestId, "start scanning", [&]() {
+        mAdvertismentMap.clear();
+        mAllowDuplicates = allowDuplicates;
+        mScanServiceUUIDs = serviceUUIDs;
 
-    BluetoothLEAdvertisementFilter filter = BluetoothLEAdvertisementFilter();
-    BluetoothLEAdvertisement advertisment = BluetoothLEAdvertisement();
-    auto services = advertisment.ServiceUuids();
-    // This was replaced by the filtering after the scan result
-    // for (auto uuid : serviceUUIDs)
-    // {
-    //     services.Append(uuid);
-    // }
-    // filter.Advertisement(advertisment);
-    mAdvertismentWatcher.AdvertisementFilter(filter);
+        BluetoothLEAdvertisementFilter filter = BluetoothLEAdvertisementFilter();
+        BluetoothLEAdvertisement advertisment = BluetoothLEAdvertisement();
+        auto services = advertisment.ServiceUuids();
+        // This was replaced by the filtering after the scan result
+        // for (auto uuid : serviceUUIDs)
+        // {
+        //     services.Append(uuid);
+        // }
+        // filter.Advertisement(advertisment);
+        mAdvertismentWatcher.AdvertisementFilter(filter);
 
-    mAdvertismentWatcher.Start();
-    mEmit.ScanState(true);
+        // Set before Start(): the watcher may report Stopped (radio off) from
+        // another thread before Start() even returns, and that stop must
+        // still be reported.
+        mScanning.store(true);
+        mAdvertismentWatcher.Start();
+        mBridge->notify("onScanStart");
+        Resolve(requestId);
+    });
 }
 
 void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
@@ -232,7 +377,7 @@ void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
         mAdvertismentMap.insert(uuid);
         auto peripheral =
             PeripheralWinrt(bluetoothAddress, advertismentType, rssi, args.Advertisement());
-        mEmit.Scan(uuid, rssi, peripheral);
+        NotifyDiscover(uuid, rssi, peripheral);
         mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
     }
     else
@@ -242,108 +387,163 @@ void BLEManager::OnScanResult(BluetoothLEAdvertisementWatcher watcher,
         if (mAllowDuplicates || mAdvertismentMap.find(uuid) == mAdvertismentMap.end())
         {
             mAdvertismentMap.insert(uuid);
-            mEmit.Scan(uuid, rssi, peripheral);
+            NotifyDiscover(uuid, rssi, peripheral);
         }
     }
 }
 
-void BLEManager::StopScan()
+void BLEManager::StopScan(noble::RequestId requestId)
 {
-    mAdvertismentWatcher.Stop();
-    
-    auto status = mAdvertismentWatcher.Status();
-    if (status == BluetoothLEAdvertisementWatcherStatus::Stopped ||
-        status == BluetoothLEAdvertisementWatcherStatus::Aborted) {
-        mEmit.ScanState(false);
-    }
+    Attempt(requestId, "stop scanning", [&]() {
+        // Queue the request before Stop(): the Stopped event can fire on
+        // another thread before Stop() returns.
+        {
+            std::lock_guard<std::mutex> lock(mPendingMutex);
+            mPendingStopScans.push_back(requestId);
+        }
+
+        mAdvertismentWatcher.Stop();
+
+        // While the watcher is still `Stopping`, OnScanStopped() settles the
+        // request. In every other state (already stopped, aborted, or never
+        // started) no Stopped event is coming, so settle it here.
+        auto status = mAdvertismentWatcher.Status();
+        if (status != BluetoothLEAdvertisementWatcherStatus::Stopping)
+        {
+            SettleScanStop();
+        }
+    });
 }
 
 void BLEManager::OnScanStopped(BluetoothLEAdvertisementWatcher watcher,
                                const BluetoothLEAdvertisementWatcherStoppedEventArgs& args)
 {
-    mEmit.ScanState(false);
+    SettleScanStop();
 }
 
-bool BLEManager::Connect(const std::string& uuid)
+// Reports a scan stop exactly once per stop: resolves the stopScanning()
+// requests waiting for it and notifies onScanStop. Scanning can also stop on
+// its own (e.g. the radio is switched off); then there is nothing to resolve
+// and only the notification is sent.
+void BLEManager::SettleScanStop()
 {
-    if (mDeviceMap.find(uuid) == mDeviceMap.end())
+    std::vector<noble::RequestId> requests;
     {
-        // Convert UUID string to MAC address format
-        // Remove any colons if present and convert to uppercase
-        std::string cleanUuid = uuid;
-        cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
-        
-        // Basic validation
-        if (cleanUuid.length() != 12) {
-            mEmit.Connected(uuid, "invalid device address format");
-            return false;
-        }
-
-        try {
-            // Convert string to uint64_t bluetooth address
-            uint64_t bluetoothAddress = std::stoull(cleanUuid, nullptr, 16);
-            
-            // Create a new peripheral entry as if it was scanned
-            auto peripheral = PeripheralWinrt(bluetoothAddress, 
-                                            BluetoothLEAdvertisementType::ConnectableUndirected, 
-                                            127,  // default RSSI for direct connect
-                                            BluetoothLEAdvertisement()); // empty advertisement
-            
-            // Emit scan event just like during normal scanning
-            mEmit.Scan(uuid, 127, peripheral);
-            
-            // Add to device map
-            mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
-        } catch (const std::exception&) {
-            mEmit.Connected(uuid, "invalid device address format");
-            return false;
-        }
+        std::lock_guard<std::mutex> lock(mPendingMutex);
+        requests.swap(mPendingStopScans);
     }
-
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
-    if (!peripheral.device.has_value())
+    bool wasScanning = mScanning.exchange(false);
+    if (wasScanning || !requests.empty())
     {
-        auto completed = bind2(this, &BLEManager::OnConnected, uuid);
-        BluetoothLEDevice::FromBluetoothAddressAsync(peripheral.bluetoothAddress)
-            .Completed(completed);
+        mBridge->notify("onScanStop");
     }
-    else
+    for (auto requestId : requests)
     {
-        mEmit.Connected(uuid);
+        Resolve(requestId);
     }
-    return true;
 }
 
-void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status,
-                             const std::string uuid)
+// --- connection --------------------------------------------------------------
+
+void BLEManager::Connect(noble::RequestId requestId, const std::string& uuid)
 {
-    if (status == AsyncStatus::Completed)
-    {
-        BluetoothLEDevice device = asyncOp.GetResults();
-        // device can be null if the connection failed
-        if (device)
+    Attempt(requestId, "connect", [&]() {
+        if (mDeviceMap.find(uuid) == mDeviceMap.end())
         {
-            auto onChanged = bind2(this, &BLEManager::OnConnectionStatusChanged);
-            auto token = device.ConnectionStatusChanged(onChanged);
-            auto uuid = formatBluetoothUuid(device.BluetoothAddress());
-            PeripheralWinrt& peripheral = mDeviceMap[uuid];
-            peripheral.device = device;
-            peripheral.connectionToken = token;
-            mEmit.Connected(uuid);
-            
-            // Get GATT session to access the MTU
-            auto completed = bind2(this, &BLEManager::OnGattSessionCreated, uuid);
-            GattSession::FromDeviceIdAsync(device.BluetoothDeviceId()).Completed(completed);
+            // Convert UUID string to MAC address format
+            // Remove any colons if present and convert to uppercase
+            std::string cleanUuid = uuid;
+            cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
+
+            // Basic validation
+            if (cleanUuid.length() != 12 ||
+                cleanUuid.find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos)
+            {
+                Reject(requestId, "invalid device address format");
+                return;
+            }
+
+            try
+            {
+                // Convert string to uint64_t bluetooth address
+                uint64_t bluetoothAddress = std::stoull(cleanUuid, nullptr, 16);
+
+                // Create a new peripheral entry as if it was scanned
+                auto peripheral = PeripheralWinrt(bluetoothAddress,
+                                                  BluetoothLEAdvertisementType::ConnectableUndirected,
+                                                  127,  // default RSSI for direct connect
+                                                  BluetoothLEAdvertisement()); // empty advertisement
+
+                // Report the peripheral just like during normal scanning
+                NotifyDiscover(uuid, 127, peripheral);
+
+                // Add to device map
+                mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
+            }
+            catch (const std::exception&)
+            {
+                Reject(requestId, "invalid device address format");
+                return;
+            }
+        }
+
+        PeripheralWinrt& peripheral = mDeviceMap[uuid];
+        if (!peripheral.device.has_value())
+        {
+            // Tracked as a connect request so cancelConnect() can reject it.
+            Track(requestId, uuid, true);
+            auto completed = Bind(&BLEManager::OnConnected, requestId, uuid);
+            BluetoothLEDevice::FromBluetoothAddressAsync(peripheral.bluetoothAddress)
+                .Completed(completed);
         }
         else
         {
-            mEmit.Connected(uuid, "could not connect to device: result is null");
+            Resolve(requestId);
         }
-    }
-    else
-    {
-        mEmit.Connected(uuid, "could not connect to device");
-    }
+    });
+}
+
+void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status,
+                             noble::RequestId requestId, const std::string uuid)
+{
+    Attempt(requestId, "connect", [&]() {
+        if (status == AsyncStatus::Completed)
+        {
+            BluetoothLEDevice device = asyncOp.GetResults();
+            // device can be null if the connection failed
+            if (device)
+            {
+                if (!IsPending(requestId))
+                {
+                    // cancelConnect() / disconnect() already rejected this
+                    // request while Windows was still looking for the device:
+                    // do not keep a link nobody is waiting for.
+                    device.Close();
+                    return;
+                }
+
+                auto onChanged = Bind(&BLEManager::OnConnectionStatusChanged);
+                auto token = device.ConnectionStatusChanged(onChanged);
+                auto deviceUuid = formatBluetoothUuid(device.BluetoothAddress());
+                PeripheralWinrt& peripheral = mDeviceMap[deviceUuid];
+                peripheral.device = device;
+                peripheral.connectionToken = token;
+                Resolve(requestId);
+
+                // Get GATT session to access the MTU
+                auto completed = Bind(&BLEManager::OnGattSessionCreated, deviceUuid);
+                GattSession::FromDeviceIdAsync(device.BluetoothDeviceId()).Completed(completed);
+            }
+            else
+            {
+                Reject(requestId, "could not connect to device: result is null");
+            }
+        }
+        else
+        {
+            Reject(requestId, "could not connect to device");
+        }
+    });
 }
 
 void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, AsyncStatus status, const std::string uuid)
@@ -356,11 +556,11 @@ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, Asyn
             // MaxPduSize is equivalent to the MTU-3 (MTU minus ATT header)
             // MTU = MaxPduSize + 3
             int mtu = session.MaxPduSize();
-            mEmit.MTU(uuid, mtu);
-            
+            NotifyMtu(uuid, mtu);
+
             // Subscribe to MTU changes
-            auto onPduSizeChanged = bind2(this, &BLEManager::OnMaxPduSizeChanged, uuid);
-            
+            auto onPduSizeChanged = Bind(&BLEManager::OnMaxPduSizeChanged, uuid);
+
             // Store both the session and the event token in the peripheral
             PeripheralWinrt& peripheral = mDeviceMap[uuid];
             peripheral.gattSession = session;
@@ -385,18 +585,21 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
 {
     // Update MTU value when it changes
     int mtu = session.MaxPduSize();
-    mEmit.MTU(uuid, mtu);
+    NotifyMtu(uuid, mtu);
 }
 
-bool BLEManager::Pair(const std::string& uuid,
+void BLEManager::Pair(noble::RequestId requestId, const std::string& uuid,
                       winrt::Windows::Devices::Enumeration::DevicePairingKinds kinds,
-                      winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel)
+                      winrt::Windows::Devices::Enumeration::DevicePairingProtectionLevel protectionLevel,
+                      const std::string& pin)
 {
+    // `pin` is empty when the caller supplied none. It is a secret: it must
+    // never reach LOGE() or a rejection message.
     auto it = mDeviceMap.find(uuid);
     if (it == mDeviceMap.end() || !it->second.device.has_value())
     {
-        mEmit.Paired(uuid, false, "device not connected");
-        return true;
+        Reject(requestId, "device not connected");
+        return;
     }
 
     BluetoothLEDevice& device = *it->second.device;
@@ -409,6 +612,8 @@ bool BLEManager::Pair(const std::string& uuid,
     // service. A throw from any of them that escapes Pair() would propagate out
     // of the JS binding's QueuedEventRegistration::ForwardByBaton dispatch and
     // tear down the node module — that's the crash we're guarding against.
+    // Every exit below settles the request: resolved when the device is (or
+    // already was) paired, rejected with the reason otherwise.
     //
     // `custom`, `token`, and `handlerRegistered` are declared before the try so
     // both catch blocks can see them. `custom` is null-initialised because it
@@ -425,33 +630,52 @@ bool BLEManager::Pair(const std::string& uuid,
         // Already bonded — report success immediately.
         if (pairing.IsPaired())
         {
-            mEmit.Paired(uuid, true);
-            return true;
+            Resolve(requestId);
+            return;
         }
 
         if (!pairing.CanPair())
         {
-            mEmit.Paired(uuid, false, "device reports it cannot be paired");
-            return true;
+            Reject(requestId, "device reports it cannot be paired");
+            return;
         }
 
-        // These ceremony values are not supported because this library does
-        // not collect PIN/password input to forward into an Accept(...) overload.
-        constexpr uint32_t unsupportedKinds =
-            0x00000040u | 0x00000080u | 0x00000100u;
-        if ((static_cast<uint32_t>(kinds) & unsupportedKinds) != 0)
+        // PIN-based pairing is authenticated pairing: a caller-supplied PIN
+        // always asks Windows for EncryptionAndAuthentication, whatever level
+        // came with it (the JS layer already refuses any other combination).
+        if (!pin.empty())
         {
-            mEmit.Paired(uuid, false,
-                         "pairing kinds requiring a PIN or password are not supported");
-            return true;
+            protectionLevel = DevicePairingProtectionLevel::EncryptionAndAuthentication;
         }
+
+        // Password ceremonies remain unsupported because this library does not
+        // collect password input to forward into an Accept(...) overload.
+        // ProvidePin is supported only when the caller supplied the PIN.
+        constexpr uint32_t passwordKinds = 0x00000080u | 0x00000100u;
+        constexpr uint32_t providePinKind = 0x00000040u;
+        if ((static_cast<uint32_t>(kinds) & passwordKinds) != 0)
+        {
+            Reject(requestId, "pairing kinds requiring a password are not supported");
+            return;
+        }
+        if ((static_cast<uint32_t>(kinds) & providePinKind) != 0 && pin.empty())
+        {
+            Reject(requestId, "ProvidePin pairing requires a PIN");
+            return;
+        }
+
+        // Converted once, up front, so a conversion failure is reported by the
+        // catch blocks below instead of surfacing inside the WinRT handler.
+        // Empty when there is no PIN.
+        winrt::hstring pinValue = winrt::to_hstring(pin);
 
         // Always go through `pairing.Custom()`: only DeviceInformationCustomPairing
         // accepts a `DevicePairingKinds` mask (DeviceInformationPairing.PairAsync
         // takes only a protection level). The caller-supplied `kinds` may
-        // include ConfirmOnly, DisplayPin, or ConfirmPinMatch; PIN/password
-        // ceremonies are rejected before we get here because this library does
-        // not provide a way to collect or forward secrets to Accept(...).
+        // include ConfirmOnly, DisplayPin, or ConfirmPinMatch, plus ProvidePin
+        // when the caller supplied the PIN; password ceremonies are rejected
+        // before we get here because this library does not provide a way to
+        // collect or forward passwords to Accept(...).
         //
         // The PairingRequested lambda must Accept() exactly once for any kind
         // the caller advertised in `kinds`. Some devices negotiated through
@@ -462,9 +686,14 @@ bool BLEManager::Pair(const std::string& uuid,
         // RejectedByHandler / AuthenticationNotAllowed. We never forward a PIN
         // or password back to JS — Windows drives the UI for non-ConfirmOnly
         // ceremonies.
+        //
+        // A caller-supplied PIN is used for exactly two things: it answers a
+        // ProvidePin request, and a ConfirmPinMatch request is accepted only
+        // when the PIN Windows presents equals it (a mismatch returns without
+        // Accept(), i.e. a rejection). Neither PIN is ever logged.
         custom = pairing.Custom();
         token = custom.PairingRequested(
-            [kinds](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
+            [kinds, pinValue](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
                 winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
                 auto kind = args.PairingKind();
                 auto kindMask = static_cast<uint32_t>(kind);
@@ -477,6 +706,24 @@ bool BLEManager::Pair(const std::string& uuid,
                     confirmPinMatchRequested &&
                     kind == winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmOnly;
                 LOGE("pairing requested, kind=%d", static_cast<int>(kind));
+                bool hasPin = !pinValue.empty();
+                if (kind == winrt::Windows::Devices::Enumeration::DevicePairingKinds::ProvidePin)
+                {
+                    if (hasPin && (kindMask & requestedKinds) != 0)
+                    {
+                        args.Accept(pinValue);
+                    }
+                    return;
+                }
+                if (hasPin &&
+                    kind == winrt::Windows::Devices::Enumeration::DevicePairingKinds::ConfirmPinMatch)
+                {
+                    if ((kindMask & requestedKinds) != 0 && args.Pin() == pinValue)
+                    {
+                        args.Accept();
+                    }
+                    return;
+                }
                 if ((kindMask & requestedKinds) != 0 || confirmOnlyFallback)
                 {
                     args.Accept();
@@ -486,7 +733,10 @@ bool BLEManager::Pair(const std::string& uuid,
             });
         handlerRegistered = true;
 
-        auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
+        // From here on the request is settled by OnPaired(), or rejected if the
+        // peripheral disconnects first.
+        Track(requestId, uuid);
+        auto completed = Bind(&BLEManager::OnPaired, requestId, token, custom);
         custom.PairAsync(kinds, protectionLevel)
             .Completed(completed);
     }
@@ -496,7 +746,7 @@ bool BLEManager::Pair(const std::string& uuid,
         {
             try { custom.PairingRequested(token); } catch (...) {}
         }
-        mEmit.Paired(uuid, false, "pairing operation failed: " + winrt::to_string(e.message()));
+        Reject(requestId, "pairing operation failed: " + winrt::to_string(e.message()));
     }
     catch (const std::exception& e)
     {
@@ -504,9 +754,35 @@ bool BLEManager::Pair(const std::string& uuid,
         {
             try { custom.PairingRequested(token); } catch (...) {}
         }
-        mEmit.Paired(uuid, false, std::string("pairing operation failed: ") + e.what());
+        Reject(requestId, std::string("pairing operation failed: ") + e.what());
     }
-    return true;
+    catch (...)
+    {
+        if (handlerRegistered)
+        {
+            try { custom.PairingRequested(token); } catch (...) {}
+        }
+        Reject(requestId, "pairing operation failed");
+    }
+}
+
+// Resolves with whether Windows reports a bond for the connected device, so an
+// application can skip asking for a PIN. Like every other peripheral request it
+// rejects when the peripheral is unknown or not connected: without a
+// BluetoothLEDevice there is no pairing state to read.
+void BLEManager::IsPaired(noble::RequestId requestId, const std::string& uuid)
+{
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
+    {
+        return;
+    }
+    Attempt(requestId, "reading the pairing state", [&]() {
+        bool paired = peripheral->device->DeviceInformation().Pairing().IsPaired();
+        Resolve(requestId, [paired](Napi::Env env) -> Napi::Value {
+            return Napi::Boolean::New(env, paired);
+        });
+    });
 }
 
 std::string pairingResultStatusToString(DevicePairingResultStatus status)
@@ -543,7 +819,7 @@ std::string pairingResultStatusToString(DevicePairingResultStatus status)
 }
 
 void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncStatus status,
-                          const std::string uuid,
+                          noble::RequestId requestId,
                           winrt::event_token token,
                           winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing custom)
 {
@@ -551,24 +827,24 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
     // this, a stray callback (e.g. if the device re-prompts) would call Accept/
     // Reject on already-resolved args and could log confusing messages. Best-effort
     // (guarded like the revocation sites in Pair()): a throw here must not skip
-    // the pairing result emission below. This block deliberately stays outside
+    // settling the pairing request below. This block deliberately stays outside
     // the result-handling try because revocation should always run even when
     // the result itself is unusable.
     try { custom.PairingRequested(token); } catch (...) {}
 
     // Everything below — status branching, asyncOp.GetResults(), result.Status(),
-    // logging that touches the status enum, and the final emission — can throw
+    // logging that touches the status enum, and settling the request — can throw
     // winrt::hresult_error (revoked asyncOp, marshalling failures) or a standard
     // exception (e.g. formatBluetoothUuid-style misbehaviour surfacing a bad_alloc).
     // A throw escaping OnPaired would propagate through the Completed() handler
     // that JS bindings registered and terminate the node module. Wrap the whole
     // result-handling tail in one try/catch so the consumer always gets a
-    // deterministic Paired(uuid, false, ...).
+    // deterministic rejection of the pair() promise.
     try
     {
         if (status != AsyncStatus::Completed)
         {
-            mEmit.Paired(uuid, false, "pairing operation " + asyncStatusToString(status));
+            Reject(requestId, "pairing operation " + asyncStatusToString(status));
             return;
         }
 
@@ -578,43 +854,71 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
         if (resultStatus == DevicePairingResultStatus::Paired ||
             resultStatus == DevicePairingResultStatus::AlreadyPaired)
         {
-            mEmit.Paired(uuid, true);
+            Resolve(requestId);
         }
         else
         {
-            mEmit.Paired(uuid, false,
-                         "pairing failed with status " + pairingResultStatusToString(resultStatus));
+            Reject(requestId, "pairing failed with status " + pairingResultStatusToString(resultStatus));
         }
     }
     catch (const winrt::hresult_error& e)
     {
-        mEmit.Paired(uuid, false,
-                     "pairing result failed: " + winrt::to_string(e.message()));
+        Reject(requestId, "pairing result failed: " + winrt::to_string(e.message()));
     }
     catch (const std::exception& e)
     {
-        mEmit.Paired(uuid, false,
-                     std::string("pairing result failed: ") + e.what());
+        Reject(requestId, std::string("pairing result failed: ") + e.what());
+    }
+    catch (...)
+    {
+        Reject(requestId, "pairing result failed");
     }
 }
 
-bool BLEManager::Disconnect(const std::string& uuid)
+// Closes the link (if any) and rejects every request still waiting on the
+// peripheral, so no promise outlives its connection.
+void BLEManager::DropConnection(const std::string& uuid, const std::string& message,
+                                const std::string& connectMessage)
 {
-    CHECK_DEVICE();
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
-    peripheral.Disconnect();
+    auto it = mDeviceMap.find(uuid);
+    if (it != mDeviceMap.end())
+    {
+        try
+        {
+            it->second.Disconnect();
+        }
+        catch (...)
+        {
+            // Closing an already broken link can throw; the link is gone either way.
+            LOGE("closing the connection to %s failed", uuid.c_str());
+            it->second.device = std::nullopt;
+        }
+    }
     mNotifyMap.Remove(uuid);
-    mEmit.Disconnected(uuid);
-    return true;
+    RejectPending(uuid, message, connectMessage);
 }
 
-bool BLEManager::CancelConnect(const std::string& uuid)
+void BLEManager::Disconnect(const std::string& uuid)
 {
-    CHECK_DEVICE();
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
-    peripheral.Disconnect();
-    mNotifyMap.Remove(uuid);
-    return true;
+    if (mDeviceMap.find(uuid) == mDeviceMap.end())
+    {
+        LOGE("device with id %s not found", uuid.c_str());
+        return;
+    }
+    DropConnection(uuid, kDisconnected, kConnectCanceled);
+    NotifyDisconnect(uuid, "disconnect requested");
+}
+
+void BLEManager::CancelConnect(const std::string& uuid)
+{
+    if (mDeviceMap.find(uuid) == mDeviceMap.end())
+    {
+        LOGE("device with id %s not found", uuid.c_str());
+        return;
+    }
+    // A connect() still in flight rejects with 'connection canceled!';
+    // OnConnected() then discards the device if Windows still delivers it.
+    DropConnection(uuid, kDisconnected, kConnectCanceled);
 }
 
 void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
@@ -631,259 +935,315 @@ void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
         PeripheralWinrt& peripheral = mDeviceMap[uuid];
         if (peripheral.device.has_value() && peripheral.device.value() == device)
         {
-            peripheral.Disconnect();
-            mNotifyMap.Remove(uuid);
-            mEmit.Disconnected(uuid);
+            DropConnection(uuid, kDisconnected, kConnectCanceled);
+            // Windows does not say why the link was lost.
+            NotifyDisconnect(uuid, "unknown");
         }
     }
 }
 
-bool BLEManager::UpdateRSSI(const std::string& uuid)
+void BLEManager::UpdateRSSI(noble::RequestId requestId, const std::string& uuid)
 {
-    CHECK_DEVICE();
+    auto it = mDeviceMap.find(uuid);
+    if (it == mDeviceMap.end())
+    {
+        LOGE("device with id %s not found", uuid.c_str());
+        Reject(requestId, "peripheral " + uuid + " not found");
+        return;
+    }
 
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
     // no way to get the rssi while we are connected, return the last value of advertisement
-    mEmit.RSSI(uuid, peripheral.rssi);
-    return true;
+    int rssi = it->second.rssi;
+    mBridge->notify("onRssi", [uuid, rssi](Napi::Env env) {
+        return std::vector<napi_value>{ toUuid(env, uuid), Napi::Number::New(env, rssi) };
+    });
+    Resolve(requestId, [rssi](Napi::Env env) -> Napi::Value { return Napi::Number::New(env, rssi); });
 }
 
-bool BLEManager::DiscoverServices(const std::string& uuid,
+// --- GATT --------------------------------------------------------------------
+
+void BLEManager::DiscoverServices(noble::RequestId requestId, const std::string& uuid,
                                   const std::vector<winrt::guid>& serviceUUIDs)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        auto completed = bind2(this, &BLEManager::OnServicesDiscovered, uuid, serviceUUIDs);
-        device.GetGattServicesAsync(BluetoothCacheMode::Uncached).Completed(completed);
-        return true;
+        return;
     }
+    Attempt(requestId, "discovering services", [&]() {
+        auto completed = Bind(&BLEManager::OnServicesDiscovered, requestId, uuid, serviceUUIDs);
+        peripheral->device->GetGattServicesAsync(BluetoothCacheMode::Uncached).Completed(completed);
+    });
 }
 
 void BLEManager::OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> asyncOp,
-                                      AsyncStatus status, const std::string uuid,
+                                      AsyncStatus status, noble::RequestId requestId,
+                                      const std::string uuid,
                                       const std::vector<winrt::guid> serviceUUIDs)
 {
-    auto result = asyncOp.GetResults();
-    std::vector<std::string> serviceUuids;
-    
-    auto emit = [this, uuid, &serviceUuids](const std::string& err) {
-        auto error = err + " while discovering services";
-        mEmit.ServicesDiscovered(uuid, serviceUuids, error);
-    };
-
-    CHECK_STATUS_AND_RESULT(status, result, emit);
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
-    FOR(service, result.Services())
-    {
-        auto id = service.Uuid();
-        if (inFilter(serviceUUIDs, id))
+    Attempt(requestId, "discovering services", [&]() {
+        if (!IsPending(requestId))
         {
-            serviceUuids.push_back(toStr(id));
+            // The peripheral disconnected meanwhile (the request is already
+            // rejected): do not cache services of a dead link.
+            return;
         }
-        //remember for cleanup
-        peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
-    }
-    mEmit.ServicesDiscovered(uuid, serviceUuids);
+        auto result = resultsOrNull(asyncOp, status);
+        std::vector<std::string> serviceUuids;
+
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while discovering services");
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        PeripheralWinrt& peripheral = mDeviceMap[uuid];
+        FOR(service, result.Services(), fail)
+        {
+            auto id = service.Uuid();
+            if (inFilter(serviceUUIDs, id))
+            {
+                serviceUuids.push_back(toStr(id));
+            }
+            //remember for cleanup
+            peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
+        }
+        Resolve(requestId, [serviceUuids](Napi::Env env) -> Napi::Value {
+            return toUuidArray(env, serviceUuids);
+        });
+    });
 }
 
-bool BLEManager::DiscoverIncludedServices(const std::string& uuid, const winrt::guid& serviceUuid,
+void BLEManager::DiscoverIncludedServices(noble::RequestId requestId, const std::string& uuid,
+                                          const winrt::guid& serviceUuid,
                                           const std::vector<winrt::guid>& serviceUUIDs)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetService(serviceUuid, [=](std::optional<GattDeviceService> service) {
-            if (service)
-            {
-                std::string serviceId = toStr(serviceUuid);
-                service->GetIncludedServicesAsync(BluetoothCacheMode::Uncached)
-                    .Completed(bind2(this, &BLEManager::OnIncludedServicesDiscovered, uuid,
-                                     serviceId, serviceUUIDs));
-            }
-            else
-            {
-                LOGE("GetService error");
-            }
-        });
-        return true;
+        return;
     }
+    Attempt(requestId, "discovering included services", [&]() {
+        peripheral->GetService(
+            serviceUuid,
+            [this, requestId, uuid, serviceUuid, serviceUUIDs](std::optional<GattDeviceService> service) {
+                Attempt(requestId, "discovering included services", [&]() {
+                    std::string serviceId = toStr(serviceUuid);
+                    if (service)
+                    {
+                        service->GetIncludedServicesAsync(BluetoothCacheMode::Uncached)
+                            .Completed(Bind(&BLEManager::OnIncludedServicesDiscovered, requestId,
+                                            uuid, serviceId, serviceUUIDs));
+                    }
+                    else
+                    {
+                        LOGE("GetService error");
+                        Reject(requestId, "service " + serviceId + " not found");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnIncludedServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> asyncOp,
-                                              AsyncStatus status, const std::string uuid,
-                                              const std::string serviceId,
+                                              AsyncStatus status, noble::RequestId requestId,
+                                              const std::string uuid, const std::string serviceId,
                                               const std::vector<winrt::guid> serviceUUIDs)
 {
-    auto result = asyncOp.GetResults();
-    std::vector<std::string> servicesUuids;
-    
-    auto emit = [this, uuid, serviceId, &servicesUuids](const std::string& err) { 
-        auto error = err + " while discovering included services for service " + serviceId;
-        mEmit.IncludedServicesDiscovered(uuid, serviceId, servicesUuids, error); 
-    };
-
-    CHECK_STATUS_AND_RESULT(status, result, emit);
-    PeripheralWinrt& peripheral = mDeviceMap[uuid];
-    FOR(service, result.Services())
-    {
-        auto id = service.Uuid();
-        if (inFilter(serviceUUIDs, id))
+    Attempt(requestId, "discovering included services", [&]() {
+        if (!IsPending(requestId))
         {
-            servicesUuids.push_back(toStr(id));
+            // See OnServicesDiscovered().
+            return;
         }
-        //remember for cleanup
-        peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
-    }
-    mEmit.IncludedServicesDiscovered(uuid, serviceId, servicesUuids);
+        auto result = resultsOrNull(asyncOp, status);
+        std::vector<std::string> servicesUuids;
+
+        auto fail = [&](const std::string& err) {
+            Reject(requestId,
+                   err + " while discovering included services for service " + serviceId);
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        PeripheralWinrt& peripheral = mDeviceMap[uuid];
+        FOR(service, result.Services(), fail)
+        {
+            auto id = service.Uuid();
+            if (inFilter(serviceUUIDs, id))
+            {
+                servicesUuids.push_back(toStr(id));
+            }
+            //remember for cleanup
+            peripheral.cachedServices.insert(std::make_pair(id, CachedService(service)));
+        }
+        Resolve(requestId, [servicesUuids](Napi::Env env) -> Napi::Value {
+            return toUuidArray(env, servicesUuids);
+        });
+    });
 }
 
-bool BLEManager::DiscoverCharacteristics(const std::string& uuid, const winrt::guid& serviceUuid,
+void BLEManager::DiscoverCharacteristics(noble::RequestId requestId, const std::string& uuid,
+                                         const winrt::guid& serviceUuid,
                                          const std::vector<winrt::guid>& characteristicUUIDs)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetService(serviceUuid, [=](std::optional<GattDeviceService> service) {
-            if (service)
-            {
-                std::string serviceId = toStr(serviceUuid);
-                service->GetCharacteristicsAsync(BluetoothCacheMode::Uncached)
-                    .Completed(bind2(this, &BLEManager::OnCharacteristicsDiscovered, uuid,
-                                     serviceId, characteristicUUIDs));
-            }
-            else
-            {
-                LOGE("GetService error");
-            }
-        });
-        return true;
+        return;
     }
+    Attempt(requestId, "discovering characteristics", [&]() {
+        peripheral->GetService(
+            serviceUuid,
+            [this, requestId, serviceUuid, characteristicUUIDs](std::optional<GattDeviceService> service) {
+                Attempt(requestId, "discovering characteristics", [&]() {
+                    std::string serviceId = toStr(serviceUuid);
+                    if (service)
+                    {
+                        service->GetCharacteristicsAsync(BluetoothCacheMode::Uncached)
+                            .Completed(Bind(&BLEManager::OnCharacteristicsDiscovered, requestId,
+                                            serviceId, characteristicUUIDs));
+                    }
+                    else
+                    {
+                        LOGE("GetService error");
+                        Reject(requestId, "service " + serviceId + " not found");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnCharacteristicsDiscovered(IAsyncOperation<GattCharacteristicsResult> asyncOp,
-                                             AsyncStatus status, const std::string uuid,
+                                             AsyncStatus status, noble::RequestId requestId,
                                              const std::string serviceId,
                                              const std::vector<winrt::guid> characteristicUUIDs)
 {
-    auto result = asyncOp.GetResults();
-    std::vector<std::pair<std::string, std::vector<std::string>>> characteristicsUuids;
+    Attempt(requestId, "discovering characteristics", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
+        std::vector<std::pair<std::string, std::vector<std::string>>> characteristicsUuids;
 
-    auto emit = [this, uuid, serviceId, &characteristicsUuids](const std::string& err) { 
-        auto error = err + " while discovering characteristics for service " + serviceId;
-        mEmit.CharacteristicsDiscovered(uuid, serviceId, characteristicsUuids, error); 
-    };
-    
-    CHECK_STATUS_AND_RESULT(status, result, emit);
-    FOR(characteristic, result.Characteristics())
-    {
-        auto id = characteristic.Uuid();
-        if (inFilter(characteristicUUIDs, id))
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while discovering characteristics for service " + serviceId);
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        FOR(characteristic, result.Characteristics(), fail)
         {
-            auto props = characteristic.CharacteristicProperties();
-            characteristicsUuids.push_back({ toStr(id), toPropertyArray(props) });
+            auto id = characteristic.Uuid();
+            if (inFilter(characteristicUUIDs, id))
+            {
+                auto props = characteristic.CharacteristicProperties();
+                characteristicsUuids.push_back({ toStr(id), toPropertyArray(props) });
+            }
         }
-    }
-    mEmit.CharacteristicsDiscovered(uuid, serviceId, characteristicsUuids);
+        Resolve(requestId, [characteristicsUuids](Napi::Env env) -> Napi::Value {
+            return toCharacteristicArray(env, characteristicsUuids);
+        });
+    });
 }
 
-bool BLEManager::Read(const std::string& uuid, const winrt::guid& serviceUuid,
-                      const winrt::guid& characteristicUuid)
+void BLEManager::Read(noble::RequestId requestId, const std::string& uuid,
+                      const winrt::guid& serviceUuid, const winrt::guid& characteristicUuid)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetCharacteristic(
-            serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
-                if (characteristic)
-                {
-                    characteristic->ReadValueAsync(BluetoothCacheMode::Uncached)
-                        .Completed(
-                            bind2(this, &BLEManager::OnRead, uuid, serviceId, characteristicId));
-                }
-                else
-                {
-                    LOGE("GetCharacteristic error");
-                    mEmit.Read(uuid, serviceId, characteristicId, Data(), false, "GetCharacteristic error");
-                }
-            });
-        return true;
+        return;
     }
+    Attempt(requestId, "read", [&]() {
+        peripheral->GetCharacteristic(
+            serviceUuid, characteristicUuid,
+            [this, requestId, characteristicUuid](std::optional<GattCharacteristic> characteristic) {
+                Attempt(requestId, "read", [&]() {
+                    std::string characteristicId = toStr(characteristicUuid);
+                    if (characteristic)
+                    {
+                        characteristic->ReadValueAsync(BluetoothCacheMode::Uncached)
+                            .Completed(Bind(&BLEManager::OnRead, requestId, characteristicId));
+                    }
+                    else
+                    {
+                        LOGE("GetCharacteristic error");
+                        Reject(requestId, "GetCharacteristic error");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnRead(IAsyncOperation<GattReadResult> asyncOp, AsyncStatus status,
-                        const std::string uuid, const std::string serviceId,
-                        const std::string characteristicId)
+                        noble::RequestId requestId, const std::string characteristicId)
 {
-    auto result = asyncOp.GetResults();
+    Attempt(requestId, "read", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
 
-    auto emit = [this, uuid, serviceId, characteristicId](const std::string& err) { 
-        auto error = err + " while reading characteristic " + characteristicId;
-        mEmit.Read(uuid, serviceId, characteristicId, Data(), false, error); 
-    };
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while reading characteristic " + characteristicId);
+        };
 
-    CHECK_STATUS_AND_RESULT(status, result, emit);
+        CHECK_STATUS_AND_RESULT(status, result, fail);
 
-    auto value = result.Value();
-    if (value)
-    {
-        auto reader = DataReader::FromBuffer(value);
-        Data data(reader.UnconsumedBufferLength());
-        reader.ReadBytes(data);
-        mEmit.Read(uuid, serviceId, characteristicId, data, false);
-    }
-    else {
-        mEmit.Read(uuid, serviceId, characteristicId, Data(), false, "value is null");
-    }
+        auto value = result.Value();
+        if (value)
+        {
+            Data data = readBuffer(value);
+            Resolve(requestId, [data](Napi::Env env) -> Napi::Value { return toBuffer(env, data); });
+        }
+        else
+        {
+            Reject(requestId, "value is null");
+        }
+    });
 }
 
-bool BLEManager::Write(const std::string& uuid, const winrt::guid& serviceUuid,
-                       const winrt::guid& characteristicUuid, const Data& data,
-                       bool withoutResponse)
+void BLEManager::Write(noble::RequestId requestId, const std::string& uuid,
+                       const winrt::guid& serviceUuid, const winrt::guid& characteristicUuid,
+                       const Data& data, bool withoutResponse)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetCharacteristic(
-            serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
-                if (characteristic)
-                {
-                    auto writer = DataWriter();
-                    writer.WriteBytes(data);
-                    auto value = writer.DetachBuffer();
-                    GattWriteOption option = withoutResponse ? GattWriteOption::WriteWithoutResponse
-                                                             : GattWriteOption::WriteWithResponse;
-                    characteristic->WriteValueWithResultAsync(value, option)
-                        .Completed(
-                            bind2(this, &BLEManager::OnWrite, uuid, serviceId, characteristicId));
-                }
-                else
-                {
-                    LOGE("GetCharacteristic error");
-                    mEmit.Write(uuid, serviceId, characteristicId, "GetCharacteristic error");
-                }
-            });
-        return true;
+        return;
     }
+    Attempt(requestId, "write", [&]() {
+        peripheral->GetCharacteristic(
+            serviceUuid, characteristicUuid,
+            [this, requestId, characteristicUuid, data, withoutResponse](std::optional<GattCharacteristic> characteristic) {
+                Attempt(requestId, "write", [&]() {
+                    std::string characteristicId = toStr(characteristicUuid);
+                    if (characteristic)
+                    {
+                        auto writer = DataWriter();
+                        writer.WriteBytes(data);
+                        auto value = writer.DetachBuffer();
+                        GattWriteOption option = withoutResponse
+                            ? GattWriteOption::WriteWithoutResponse
+                            : GattWriteOption::WriteWithResponse;
+                        characteristic->WriteValueWithResultAsync(value, option)
+                            .Completed(Bind(&BLEManager::OnWrite, requestId, characteristicId));
+                    }
+                    else
+                    {
+                        LOGE("GetCharacteristic error");
+                        Reject(requestId, "GetCharacteristic error");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnWrite(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus status,
-                         const std::string uuid, const std::string serviceId,
-                         const std::string characteristicId)
+                         noble::RequestId requestId, const std::string characteristicId)
 {
-    if (status == AsyncStatus::Completed)
-    {
-        mEmit.Write(uuid, serviceId, characteristicId);
-    }
-    else
-    {
-        std::string error = "status: " + std::to_string((int)status);
-        mEmit.Write(uuid, serviceId, characteristicId, error);
-    }
+    Attempt(requestId, "write", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
+
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while writing characteristic " + characteristicId);
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        Resolve(requestId);
+    });
 }
 
 GattClientCharacteristicConfigurationDescriptorValue
@@ -900,14 +1260,17 @@ GetDescriptorValue(GattCharacteristicProperties properties)
     }
 }
 
-bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
-                        const winrt::guid& characteristicUuid, bool on)
+void BLEManager::Notify(noble::RequestId requestId, const std::string& uuid,
+                        const winrt::guid& serviceUuid, const winrt::guid& characteristicUuid,
+                        bool on)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        auto onCharacteristic = [=](std::optional<GattCharacteristic> characteristic) {
-            std::string serviceId = toStr(serviceUuid);
+        return;
+    }
+    auto onCharacteristic = [this, requestId, uuid, characteristicUuid, on](std::optional<GattCharacteristic> characteristic) {
+        Attempt(requestId, "notify", [&]() {
             std::string characteristicId = toStr(characteristicUuid);
             if (characteristic)
             {
@@ -918,38 +1281,48 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
                     if (subscribed)
                     {
                         // already listening
-                        mEmit.Notify(uuid, serviceId, characteristicId, true);
+                        Resolve(requestId);
                         return;
                     }
 
-                    auto onChanged = bind2(this, &BLEManager::OnValueChanged, uuid);
+                    auto onChanged = Bind(&BLEManager::OnValueChanged, uuid);
                     auto token = characteristic->ValueChanged(onChanged);
                     mNotifyMap.Add(uuid, *characteristic, token);
 
-                    auto descriptorValue =
-                        GetDescriptorValue(characteristic->CharacteristicProperties());
+                    try
+                    {
+                        auto descriptorValue =
+                            GetDescriptorValue(characteristic->CharacteristicProperties());
 
-                    auto completed = bind2(this, &BLEManager::OnNotify, *characteristic, uuid,
-                                           serviceId, characteristicId, on);
-                    characteristic
-                        ->WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
-                            descriptorValue)
-                        .Completed(completed);
+                        auto completed = Bind(&BLEManager::OnNotify, requestId, *characteristic,
+                                              uuid, characteristicId, on);
+                        characteristic
+                            ->WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
+                                descriptorValue)
+                            .Completed(completed);
+                    }
+                    catch (...)
+                    {
+                        // The subscription never started: forget the handler
+                        // again, then let Attempt() reject the request.
+                        try { mNotifyMap.Unsubscribe(uuid, *characteristic); } catch (...) {}
+                        throw;
+                    }
                 }
                 else
                 {
                     if (!subscribed)
                     {
                         // already not listening
-                        mEmit.Notify(uuid, serviceId, characteristicId, false);
+                        Resolve(requestId);
                         return;
                     }
 
                     mNotifyMap.Unsubscribe(uuid, *characteristic);
                     auto descriptorValue =
                         GattClientCharacteristicConfigurationDescriptorValue::None;
-                    auto completed = bind2(this, &BLEManager::OnNotify, *characteristic, uuid,
-                                           serviceId, characteristicId, on);
+                    auto completed = Bind(&BLEManager::OnNotify, requestId, *characteristic, uuid,
+                                          characteristicId, on);
                     characteristic
                         ->WriteClientCharacteristicConfigurationDescriptorWithResultAsync(
                             descriptorValue)
@@ -959,159 +1332,179 @@ bool BLEManager::Notify(const std::string& uuid, const winrt::guid& serviceUuid,
             else
             {
                 LOGE("GetCharacteristic error");
-                mEmit.Notify(uuid, serviceId, characteristicId, on, "GetCharacteristic error");
+                Reject(requestId, "GetCharacteristic error");
             }
-        };
-        peripheral.GetCharacteristic(serviceUuid, characteristicUuid, onCharacteristic);
-        return true;
-    }
+        });
+    };
+    Attempt(requestId, "notify", [&]() {
+        peripheral->GetCharacteristic(serviceUuid, characteristicUuid, onCharacteristic);
+    });
 }
 
 void BLEManager::OnNotify(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus status,
-                          const GattCharacteristic characteristic, const std::string uuid,
-                          const std::string serviceId, const std::string characteristicId,
+                          noble::RequestId requestId, const GattCharacteristic characteristic,
+                          const std::string uuid, const std::string characteristicId,
                           const bool state)
 {
-    if (status == AsyncStatus::Completed)
-    {
-        mEmit.Notify(uuid, serviceId, characteristicId, state);
-    }
-    else
-    {
-        std::string error = "status: " + std::to_string((int)status);
-        mEmit.Notify(uuid, serviceId, characteristicId, state, error);
-        if (state == true)
-        {
-            mNotifyMap.Unsubscribe(uuid, characteristic);
-        }
-    }
+    Attempt(requestId, "notify", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
+
+        auto fail = [&](const std::string& err) {
+            if (state == true)
+            {
+                // The subscription was not established: stop listening again.
+                try { mNotifyMap.Unsubscribe(uuid, characteristic); } catch (...) {}
+            }
+            Reject(requestId,
+                   err + (state ? " while subscribing to characteristic "
+                                : " while unsubscribing from characteristic ") +
+                       characteristicId);
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        Resolve(requestId);
+    });
 }
 
 void BLEManager::OnValueChanged(GattCharacteristic characteristic,
                                 const GattValueChangedEventArgs& args, std::string deviceUuid)
 {
-    auto reader = DataReader::FromBuffer(args.CharacteristicValue());
-    Data data(reader.UnconsumedBufferLength());
-    reader.ReadBytes(data);
+    Data data = readBuffer(args.CharacteristicValue());
     auto characteristicUuid = toStr(characteristic.Uuid());
     auto serviceUuid = toStr(characteristic.Service().Uuid());
-    mEmit.Read(deviceUuid, serviceUuid, characteristicUuid, data, true);
+    mBridge->notify("onNotification",
+                    [deviceUuid, serviceUuid, characteristicUuid, data](Napi::Env env) {
+                        return std::vector<napi_value>{ toUuid(env, deviceUuid),
+                                                        toUuid(env, serviceUuid),
+                                                        toUuid(env, characteristicUuid),
+                                                        toBuffer(env, data) };
+                    });
 }
 
-bool BLEManager::DiscoverDescriptors(const std::string& uuid, const winrt::guid& serviceUuid,
+void BLEManager::DiscoverDescriptors(noble::RequestId requestId, const std::string& uuid,
+                                     const winrt::guid& serviceUuid,
                                      const winrt::guid& characteristicUuid)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetCharacteristic(
-            serviceUuid, characteristicUuid, [=](std::optional<GattCharacteristic> characteristic) {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
-                if (characteristic)
-                {
-                    auto completed = bind2(this, &BLEManager::OnDescriptorsDiscovered, uuid,
-                                           serviceId, characteristicId);
-                    characteristic->GetDescriptorsAsync(BluetoothCacheMode::Uncached)
-                        .Completed(completed);
-                }
-                else
-                {
-                    LOGE("GetCharacteristic error");
-                    std::vector<std::string> emptyDescriptors;
-                    mEmit.DescriptorsDiscovered(uuid, serviceId, characteristicId, emptyDescriptors, "GetCharacteristic error");
-                }
-            });
-        return true;
+        return;
     }
+    Attempt(requestId, "discovering descriptors", [&]() {
+        peripheral->GetCharacteristic(
+            serviceUuid, characteristicUuid,
+            [this, requestId, characteristicUuid](std::optional<GattCharacteristic> characteristic) {
+                Attempt(requestId, "discovering descriptors", [&]() {
+                    std::string characteristicId = toStr(characteristicUuid);
+                    if (characteristic)
+                    {
+                        auto completed = Bind(&BLEManager::OnDescriptorsDiscovered, requestId,
+                                              characteristicId);
+                        characteristic->GetDescriptorsAsync(BluetoothCacheMode::Uncached)
+                            .Completed(completed);
+                    }
+                    else
+                    {
+                        LOGE("GetCharacteristic error");
+                        Reject(requestId, "GetCharacteristic error");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnDescriptorsDiscovered(IAsyncOperation<GattDescriptorsResult> asyncOp,
-                                         AsyncStatus status, const std::string uuid,
-                                         const std::string serviceId,
+                                         AsyncStatus status, noble::RequestId requestId,
                                          const std::string characteristicId)
 {
-    auto result = asyncOp.GetResults();
-    std::vector<std::string> descriptorUuids;
+    Attempt(requestId, "discovering descriptors", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
+        std::vector<std::string> descriptorUuids;
 
-    auto emit = [this, uuid, serviceId, characteristicId, &descriptorUuids](const std::string& err) { 
-        auto error = err + " while discovering descriptors for characteristic " + characteristicId;
-        mEmit.DescriptorsDiscovered(uuid, serviceId, characteristicId, descriptorUuids, error); 
-    };
+        auto fail = [&](const std::string& err) {
+            Reject(requestId,
+                   err + " while discovering descriptors for characteristic " + characteristicId);
+        };
 
-    CHECK_STATUS_AND_RESULT(status, result, emit);
-    
-    FOR(descriptor, result.Descriptors())
-    {
-        descriptorUuids.push_back(toStr(descriptor.Uuid()));
-    }
-    mEmit.DescriptorsDiscovered(uuid, serviceId, characteristicId, descriptorUuids);
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+
+        FOR(descriptor, result.Descriptors(), fail)
+        {
+            descriptorUuids.push_back(toStr(descriptor.Uuid()));
+        }
+        Resolve(requestId, [descriptorUuids](Napi::Env env) -> Napi::Value {
+            return toUuidArray(env, descriptorUuids);
+        });
+    });
 }
 
-bool BLEManager::ReadValue(const std::string& uuid, const winrt::guid& serviceUuid,
-                           const winrt::guid& characteristicUuid, const winrt::guid& descriptorUuid)
+void BLEManager::ReadValue(noble::RequestId requestId, const std::string& uuid,
+                           const winrt::guid& serviceUuid, const winrt::guid& characteristicUuid,
+                           const winrt::guid& descriptorUuid)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        peripheral.GetDescriptor(
-            serviceUuid, characteristicUuid, descriptorUuid,
-            [=](std::optional<GattDescriptor> descriptor) {
-                std::string serviceId = toStr(serviceUuid);
-                std::string characteristicId = toStr(characteristicUuid);
-                std::string descriptorId = toStr(descriptorUuid);
-                if (descriptor)
-                {
-                    auto completed = bind2(this, &BLEManager::OnReadValue, uuid, serviceId,
-                                           characteristicId, descriptorId);
-                    descriptor->ReadValueAsync(BluetoothCacheMode::Uncached).Completed(completed);
-                }
-                else
-                {
-                    LOGE("descriptor not found");
-                    mEmit.ReadValue(uuid, serviceId, characteristicId, descriptorId, Data(), "descriptor not found");
-                }
-            });
-        return true;
+        return;
     }
+    Attempt(requestId, "reading descriptor", [&]() {
+        peripheral->GetDescriptor(
+            serviceUuid, characteristicUuid, descriptorUuid,
+            [this, requestId, descriptorUuid](std::optional<GattDescriptor> descriptor) {
+                Attempt(requestId, "reading descriptor", [&]() {
+                    std::string descriptorId = toStr(descriptorUuid);
+                    if (descriptor)
+                    {
+                        auto completed = Bind(&BLEManager::OnReadValue, requestId, descriptorId);
+                        descriptor->ReadValueAsync(BluetoothCacheMode::Uncached)
+                            .Completed(completed);
+                    }
+                    else
+                    {
+                        LOGE("descriptor not found");
+                        Reject(requestId, "descriptor not found");
+                    }
+                });
+            });
+    });
 }
 
 void BLEManager::OnReadValue(IAsyncOperation<GattReadResult> asyncOp, AsyncStatus status,
-                             const std::string uuid, const std::string serviceId,
-                             const std::string characteristicId, const std::string descriptorId)
+                             noble::RequestId requestId, const std::string descriptorId)
 {
-    auto result = asyncOp.GetResults();
+    Attempt(requestId, "reading descriptor", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
 
-    auto emit = [this, uuid, serviceId, characteristicId, descriptorId](const std::string& err) { 
-        auto error = err + " while reading value of descriptor " + descriptorId;
-        mEmit.ReadValue(uuid, serviceId, characteristicId, descriptorId, Data(), error); 
-    };
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while reading value of descriptor " + descriptorId);
+        };
 
-    CHECK_STATUS_AND_RESULT(status, result, emit);
+        CHECK_STATUS_AND_RESULT(status, result, fail);
 
-    auto value = result.Value();
-    if (value)
-    {
-        auto reader = DataReader::FromBuffer(value);
-        Data data(reader.UnconsumedBufferLength());
-        reader.ReadBytes(data);
-        mEmit.ReadValue(uuid, serviceId, characteristicId, descriptorId, data);
-    }
-    else {
-        mEmit.ReadValue(uuid, serviceId, characteristicId, descriptorId, Data(), "value is null");
-    }
+        auto value = result.Value();
+        if (value)
+        {
+            Data data = readBuffer(value);
+            Resolve(requestId, [data](Napi::Env env) -> Napi::Value { return toBuffer(env, data); });
+        }
+        else
+        {
+            Reject(requestId, "value is null");
+        }
+    });
 }
 
-bool BLEManager::WriteValue(const std::string& uuid, const winrt::guid& serviceUuid,
-                            const winrt::guid& characteristicUuid,
+void BLEManager::WriteValue(noble::RequestId requestId, const std::string& uuid,
+                            const winrt::guid& serviceUuid, const winrt::guid& characteristicUuid,
                             const winrt::guid& descriptorUuid, const Data& data)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    PeripheralWinrt* peripheral = ConnectedPeripheral(requestId, uuid);
+    if (!peripheral)
     {
-        auto onDescriptor = [=](std::optional<GattDescriptor> descriptor) {
-            std::string serviceId = toStr(serviceUuid);
-            std::string characteristicId = toStr(characteristicUuid);
+        return;
+    }
+    auto onDescriptor = [this, requestId, descriptorUuid, data](std::optional<GattDescriptor> descriptor) {
+        Attempt(requestId, "writing descriptor", [&]() {
             std::string descriptorId = toStr(descriptorUuid);
             if (descriptor)
             {
@@ -1119,90 +1512,53 @@ bool BLEManager::WriteValue(const std::string& uuid, const winrt::guid& serviceU
                 writer.WriteBytes(data);
                 auto value = writer.DetachBuffer();
                 auto asyncOp = descriptor->WriteValueWithResultAsync(value);
-                asyncOp.Completed(bind2(this, &BLEManager::OnWriteValue, uuid, serviceId,
-                                        characteristicId, descriptorId));
+                asyncOp.Completed(Bind(&BLEManager::OnWriteValue, requestId, descriptorId));
             }
             else
             {
                 LOGE("descriptor not found");
-                mEmit.WriteValue(uuid, serviceId, characteristicId, descriptorId, "descriptor not found");
+                Reject(requestId, "descriptor not found");
             }
-        };
-        peripheral.GetDescriptor(serviceUuid, characteristicUuid, descriptorUuid, onDescriptor);
-        return true;
-    }
+        });
+    };
+    Attempt(requestId, "writing descriptor", [&]() {
+        peripheral->GetDescriptor(serviceUuid, characteristicUuid, descriptorUuid, onDescriptor);
+    });
 }
 
 void BLEManager::OnWriteValue(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus status,
-                              const std::string uuid, const std::string serviceId,
-                              const std::string characteristicId, const std::string descriptorId)
+                              noble::RequestId requestId, const std::string descriptorId)
 {
-    if (status == AsyncStatus::Completed)
-    {
-        mEmit.WriteValue(uuid, serviceId, characteristicId, descriptorId);
-    }
-    else
-    {
-        std::string error = "status: " + std::to_string((int)status);
-        mEmit.WriteValue(uuid, serviceId, characteristicId, descriptorId, error);
-    }
+    Attempt(requestId, "writing descriptor", [&]() {
+        auto result = resultsOrNull(asyncOp, status);
+
+        auto fail = [&](const std::string& err) {
+            Reject(requestId, err + " while writing value of descriptor " + descriptorId);
+        };
+
+        CHECK_STATUS_AND_RESULT(status, result, fail);
+        Resolve(requestId);
+    });
 }
 
-bool BLEManager::ReadHandle(const std::string& uuid, int handle)
+// WinRT has no API to address an attribute by its handle.
+void BLEManager::ReadHandle(noble::RequestId requestId, const std::string& uuid, int handle)
 {
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
+    if (!ConnectedPeripheral(requestId, uuid))
     {
-        LOGE("not available");
-        return true;
+        return;
     }
+    LOGE("not available");
+    Reject(requestId, "reading a handle is not available on Windows");
 }
 
-void BLEManager::OnReadHandle(IAsyncOperation<GattReadResult> asyncOp, AsyncStatus status,
-                              const std::string uuid, const int handle)
+void BLEManager::WriteHandle(noble::RequestId requestId, const std::string& uuid, int handle,
+                             const Data& data)
 {
-    auto result = asyncOp.GetResults();
-    
-    auto emit = [this, uuid, handle](const std::string& err) { 
-        auto error = err + " while reading handle " + std::to_string(handle);
-        mEmit.ReadHandle(uuid, handle, Data(), error); 
-    };
-
-    CHECK_STATUS_AND_RESULT(status, result, emit);
-    
-    auto value = result.Value();
-    if (value)
+    if (!ConnectedPeripheral(requestId, uuid))
     {
-        auto reader = DataReader::FromBuffer(value);
-        Data data(reader.UnconsumedBufferLength());
-        reader.ReadBytes(data);
-        mEmit.ReadHandle(uuid, handle, data);
+        return;
     }
-    else {
-        mEmit.ReadHandle(uuid, handle, Data(), "value is null"); 
-    }
-}
-
-bool BLEManager::WriteHandle(const std::string& uuid, int handle, Data data)
-{
-    CHECK_DEVICE();
-    IFDEVICE(device, uuid)
-    {
-        LOGE("not available");
-        return true;
-    }
-}
-
-void BLEManager::OnWriteHandle(IAsyncOperation<GattWriteResult> asyncOp, AsyncStatus status,
-                               const std::string uuid, const int handle)
-{
-    if (status == AsyncStatus::Completed)
-    {
-        mEmit.WriteHandle(uuid, handle);
-    }
-    else
-    {
-        std::string error = "status: " + std::to_string((int)status);
-        mEmit.WriteHandle(uuid, handle, error);
-    }
+    LOGE("not available");
+    Reject(requestId, "writing a handle is not available on Windows");
 }
